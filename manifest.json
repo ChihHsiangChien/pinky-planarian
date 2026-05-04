@@ -1,6 +1,6 @@
 {
-  "name": "粉萌渦蟲養殖場",
-  "short_name": "粉萌渦蟲",
+  "name": "Pinky Planarian Garden",
+  "short_name": "PinkyPlanarian",
   "description": "療癒系 Verlet 物理渦蟲養殖模擬",
   "start_url": ".",
   "display": "standalone",
