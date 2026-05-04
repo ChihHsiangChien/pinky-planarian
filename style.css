@@ -81,6 +81,17 @@ button.active {
     fill: #ff4d6d;
 }
 
+#version-tag {
+    position: absolute;
+    bottom: 10px;
+    right: 15px;
+    color: #ffb7c5;
+    font-size: 12px;
+    font-weight: bold;
+    pointer-events: none;
+    opacity: 0.8;
+}
+
 .ripple {
     fill: none;
     stroke: rgba(255, 255, 255, 0.5);
