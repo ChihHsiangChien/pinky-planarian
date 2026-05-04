@@ -473,13 +473,19 @@ function loop() {
 }
 
 // --- Interaction ---
-window.addEventListener('mousemove', (e) => {
+window.addEventListener('pointermove', (e) => {
     const rect = canvas.getBoundingClientRect();
     mouseX = e.clientX - rect.left;
     mouseY = e.clientY - rect.top;
+
+    if (currentMode === 'cut' && e.buttons === 1) {
+        checkCut(mouseX, mouseY);
+    } else if (currentMode === 'tease' && (e.buttons === 1 || e.pointerType === 'touch')) {
+        checkTease(mouseX, mouseY);
+    }
 });
 
-canvas.addEventListener('mousedown', (e) => {
+canvas.addEventListener('pointerdown', (e) => {
     const rect = canvas.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
@@ -494,19 +500,6 @@ canvas.addEventListener('mousedown', (e) => {
         triggerBell(x, y);
     } else if (currentMode === 'clean') {
         createBubbles();
-    }
-});
-
-let isCutting = false;
-canvas.addEventListener('mousemove', (e) => {
-    const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-
-    if (currentMode === 'cut' && e.buttons === 1) {
-        checkCut(x, y);
-    } else if (currentMode === 'tease' && e.buttons === 1) {
-        checkTease(x, y);
     }
 });
 
