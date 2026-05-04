@@ -1,0 +1,17 @@
+{
+  "name": "粉萌渦蟲養殖場",
+  "short_name": "粉萌渦蟲",
+  "description": "療癒系 Verlet 物理渦蟲養殖模擬",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#b2ebf2",
+  "theme_color": "#ffb7c5",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
