@@ -34,12 +34,13 @@
         </div>
     </div>
     ...
-    <div id="version-tag">v0.08</div>
+    <div id="version-tag">v0.09</div>
 
         <defs>
             <filter id="gooey">
                 <feGaussianBlur in="SourceGraphic" stdDeviation="3" result="blur" />
                 <feColorMatrix in="blur" mode="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 15 -6" result="goo" />
+                <feDropShadow dx="2" dy="2" stdDeviation="2" flood-opacity="0.2"/>
             </filter>
             
             <radialGradient id="bg-gradient" cx="50%" cy="50%" r="50%">

@@ -95,6 +95,7 @@ class Planarian {
         this.nodeDist = nodeDist;
         this.baseRadii = [];
         this.color = color || PINK_COLORS[Math.floor(Math.random() * PINK_COLORS.length)];
+        this.lastKissTime = 0; // 防止過度頻繁親親
 
 
         // 如果沒有傳入現有節點，則初始化新節點
@@ -176,6 +177,12 @@ class Planarian {
                 this.regrowTimer = 0;
             }
         }
+
+        // Biological Shrink (v0.09)
+        // If not eating or water is dirty, shrink very slowly
+        const shrinkRate = 0.00005 * (1 + (100 - waterPurity) / 50);
+        this.baseRadii = this.baseRadii.map(r => Math.max(1.5, r * (1 - shrinkRate)));
+        this.constraints.forEach(c => c.length = Math.max(5, c.length * (1 - shrinkRate)));
 
         // Movement (Wander, Seek food, or Seek Bell)
         if (this.hasHead && this.stunTimer === 0) {
@@ -447,6 +454,11 @@ class AudioEngine {
         this.playNote(1567.98, now, 0.2, 0.5); // G6
         this.playNote(1318.51, now + 0.1, 0.1, 0.4); // E6
     }
+    playKiss() {
+        const now = this.ctx.currentTime;
+        this.playNote(1174.66, now, 0.1, 0.1, 'sine'); // D6
+        this.playNote(1567.98, now + 0.05, 0.1, 0.2, 'sine'); // G6
+    }
 }
 
 const audio = new AudioEngine();
@@ -477,10 +489,18 @@ function init() {
 }
 
 let saveTimer = 0;
+let socialTimer = 0;
 function loop() {
     // Water slowly gets dirty
     waterPurity = Math.max(0, waterPurity - 0.01);
     dirtyLayer.setAttribute("opacity", (1 - waterPurity / 100) * 0.3);
+
+    // Throttled Social logic (v0.09) - check every 10 frames
+    socialTimer++;
+    if (socialTimer > 10) {
+        checkSocial();
+        socialTimer = 0;
+    }
 
     // Update stats UI (v0.08)
     statCount.innerText = planarians.length;
@@ -807,5 +827,28 @@ function createHeartBurst(x, y) {
             else p.remove();
         }
         anim();
+    }
+}
+
+function checkSocial() {
+    const now = Date.now();
+    for (let i = 0; i < planarians.length; i++) {
+        for (let j = i + 1; j < planarians.length; j++) {
+            const p1 = planarians[i];
+            const p2 = planarians[j];
+            if (!p1.hasHead || !p2.hasHead) continue;
+
+            const d = distance(p1.points[0], p2.points[0]);
+            if (d < 30 && now - p1.lastKissTime > 5000 && now - p2.lastKissTime > 5000) {
+                // Trigger Kiss
+                p1.lastKissTime = now;
+                p2.lastKissTime = now;
+                const midX = (p1.points[0].x + p2.points[0].x) / 2;
+                const midY = (p1.points[0].y + p2.points[0].y) / 2;
+                createRipple(midX, midY, "#ff4d6d"); // Pink ripple
+                createHeartBurst(midX, midY);
+                audio.playKiss();
+            }
+        }
     }
 }
