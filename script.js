@@ -329,6 +329,8 @@ class Planarian {
             this.eyeL.setAttribute("cx", lx);
             this.eyeL.setAttribute("cy", ly);
             this.eyeR.setAttribute("cx", rx);
+            this.eyeR.setAttribute("cy", ry);
+            this.eyeL.style.display = "block";
             this.eyeR.style.display = "block";
         } else {
             this.head.style.display = "none";
