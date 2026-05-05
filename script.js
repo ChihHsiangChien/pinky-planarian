@@ -14,6 +14,7 @@ let foods = [];
 let currentMode = 'observe'; // observe, feed, cut, tease, bell, clean
 let waterPurity = 100;
 let mouseX = 0, mouseY = 0;
+let isPointerDown = false;
 
 const dirtyLayer = document.getElementById('dirty-layer');
 
@@ -77,16 +78,17 @@ class Constraint {
 
 // --- Planarian ---
 class Planarian {
-    constructor(x, y, numNodes = 10, nodeDist = 15, existingPoints = null) {
+    constructor(x, y, numNodes = 7, nodeDist = 15, existingPoints = null) {
         this.points = existingPoints || [];
         this.constraints = [];
         this.hasHead = true;
         this.regrowTimer = 0;
         this.stunTimer = 0;
-        this.eatCount = 0; // 新增：記錄進食次數
+        this.eatCount = 0;
         this.angle = Math.random() * Math.PI * 2;
         this.speed = 0.2 + Math.random() * 0.3;
         this.nodeDist = nodeDist;
+        this.baseRadii = []; // 存儲基礎半徑以供脈動使用
 
 
         // 如果沒有傳入現有節點，則初始化新節點
@@ -108,9 +110,9 @@ class Planarian {
         for (let i = 0; i < numNodes; i++) {
             const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
             circle.setAttribute("class", "planarian-body");
-            // Tapering size: head is larger, tail is smaller
             const radius = Math.max(2, nodeDist * (1 - i / numNodes) * 1.2);
             circle.setAttribute("r", radius);
+            this.baseRadii.push(radius);
             this.group.appendChild(circle);
             this.bodySegments.push(circle);
         }
@@ -246,8 +248,8 @@ class Planarian {
 
         // Verlet steps
         this.points.forEach(p => p.update());
-        // Reduce iterations for mobile performance (from 5 to 3)
-        for (let i = 0; i < 3; i++) {
+        // v0.03: 2 iterations is enough
+        for (let i = 0; i < 2; i++) {
             this.constraints.forEach(c => c.resolve());
         }
 
@@ -257,11 +259,15 @@ class Planarian {
     render() {
         if (this.points.length < 2) return;
 
+        // Pulse effect on radius (lighter than CSS transform)
+        const pulse = 1 + Math.sin(Date.now() * 0.005) * 0.05;
+
         // Update body segments (circles)
         this.points.forEach((p, i) => {
             if (this.bodySegments[i]) {
                 this.bodySegments[i].setAttribute("cx", p.x);
                 this.bodySegments[i].setAttribute("cy", p.y);
+                this.bodySegments[i].setAttribute("r", this.baseRadii[i] * pulse);
             }
         });
 
@@ -314,8 +320,6 @@ class Planarian {
             this.eyeL.setAttribute("cx", lx);
             this.eyeL.setAttribute("cy", ly);
             this.eyeR.setAttribute("cx", rx);
-            this.eyeR.setAttribute("cy", ry);
-            this.eyeL.style.display = "block";
             this.eyeR.style.display = "block";
         } else {
             this.head.style.display = "none";
@@ -324,40 +328,30 @@ class Planarian {
             this.eyeL.style.display = "none";
             this.eyeR.style.display = "none";
         }
-
-        // Pulse effect
-        const pulse = 1 + Math.sin(Date.now() * 0.005) * 0.05;
-        this.group.style.transform = `scale(${pulse})`;
-        this.group.style.transformOrigin = `${this.points[0].x}px ${this.points[0].y}px`;
     }
 
     grow() {
         this.eatCount++;
-        this.constraints.forEach(c => c.length *= 1.02); // 稍微變長
-        this.bodySegments.forEach(s => {
-            const r = parseFloat(s.getAttribute("r"));
-            s.setAttribute("r", r * 1.02); // 稍微變粗
-        });
+        this.constraints.forEach(c => c.length *= 1.02);
+        this.baseRadii = this.baseRadii.map(r => r * 1.02);
 
         // 每吃 3 次，長出一個新節點
         if (this.eatCount % 3 === 0) {
             const lastPoint = this.points[this.points.length - 1];
             const secondLast = this.points[this.points.length - 2];
             
-            // 在尾巴方向增加一個新點
             const dx = lastPoint.x - secondLast.x;
             const dy = lastPoint.y - secondLast.y;
             const newPoint = new Point(lastPoint.x + dx, lastPoint.y + dy);
             this.points.push(newPoint);
-            
-            // 增加新約束
             this.constraints.push(new Constraint(lastPoint, newPoint, this.nodeDist));
             
-            // 增加新 DOM 節點
             const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
             circle.setAttribute("class", "planarian-body");
-            circle.setAttribute("r", 2);
-            this.group.insertBefore(circle, this.head); // 放進 group
+            const newRadius = 2 * (1.02 ** this.eatCount);
+            circle.setAttribute("r", newRadius);
+            this.baseRadii.push(newRadius);
+            this.group.insertBefore(circle, this.head);
             this.bodySegments.push(circle);
         }
     }
@@ -469,6 +463,15 @@ function loop() {
     waterPurity = Math.max(0, waterPurity - 0.01);
     dirtyLayer.setAttribute("opacity", (1 - waterPurity / 100) * 0.3);
 
+    // Throttled Interaction logic (v0.03)
+    if (isPointerDown) {
+        if (currentMode === 'cut') {
+            checkCut(mouseX, mouseY);
+        } else if (currentMode === 'tease') {
+            checkTease(mouseX, mouseY);
+        }
+    }
+
     planarians.forEach(p => p.update());
     requestAnimationFrame(loop);
 }
@@ -478,18 +481,15 @@ window.addEventListener('pointermove', (e) => {
     const rect = canvas.getBoundingClientRect();
     mouseX = e.clientX - rect.left;
     mouseY = e.clientY - rect.top;
-
-    if (currentMode === 'cut' && e.buttons === 1) {
-        checkCut(mouseX, mouseY);
-    } else if (currentMode === 'tease' && (e.buttons === 1 || e.pointerType === 'touch')) {
-        checkTease(mouseX, mouseY);
-    }
 });
 
 canvas.addEventListener('pointerdown', (e) => {
+    isPointerDown = true;
     const rect = canvas.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
+    mouseX = x;
+    mouseY = y;
 
     if (currentMode === 'observe') {
         createRipple(x, y);
@@ -503,6 +503,9 @@ canvas.addEventListener('pointerdown', (e) => {
         createBubbles();
     }
 });
+
+window.addEventListener('pointerup', () => isPointerDown = false);
+window.addEventListener('pointercancel', () => isPointerDown = false);
 
 function checkTease(x, y) {
     planarians.forEach(p => {
