@@ -233,6 +233,7 @@ class Planarian {
                             foodLayer.children[idx].remove();
                             this.grow();
                             audio.playEat();
+                            createHeartBurst(nearest.x, nearest.y);
                             // Eating makes water slightly dirtier
                             waterPurity = Math.max(0, waterPurity - 5);
                         }
@@ -477,6 +478,10 @@ function loop() {
     waterPurity = Math.max(0, waterPurity - 0.01);
     dirtyLayer.setAttribute("opacity", (1 - waterPurity / 100) * 0.3);
 
+    // v0.06: Living Water effect
+    const bgOsc = Math.sin(Date.now() * 0.001) * 2;
+    canvas.style.backgroundColor = `hsl(${187 + bgOsc}, 60%, 92%)`;
+
     // Save state every 5 seconds (300 frames)
     saveTimer++;
     if (saveTimer > 300) {
@@ -546,7 +551,7 @@ function checkTease(x, y) {
 function triggerBell(x, y) {
     audio.playBell();
     window.bellTarget = {x, y};
-    createRipple(x, y);
+    createRipple(x, y, "#ff8fa3"); // Pink ripple for bell
     
     // Bell lasts for 3 seconds
     setTimeout(() => {
@@ -554,12 +559,13 @@ function triggerBell(x, y) {
     }, 3000);
 }
 
-function createRipple(x, y) {
+function createRipple(x, y, color = "rgba(255, 255, 255, 0.5)") {
     const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
     circle.setAttribute("cx", x);
     circle.setAttribute("cy", y);
     circle.setAttribute("r", "5");
     circle.setAttribute("class", "ripple");
+    circle.style.stroke = color;
     fxLayer.appendChild(circle);
 
     let r = 5;
@@ -747,5 +753,31 @@ function loadState() {
     } catch (e) {
         console.error("Failed to load state", e);
         return false;
+    }
+}
+
+function createHeartBurst(x, y) {
+    for (let i = 0; i < 6; i++) {
+        const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        p.setAttribute("d", "M 10,30 A 20,20 0,0,1 50,30 A 20,20 0,0,1 90,30 Q 90,60 50,90 Q 10,60 10,30 z");
+        p.setAttribute("fill", "#ff4d6d");
+        const scale = 0.05 + Math.random() * 0.1;
+        const angle = Math.random() * Math.PI * 2;
+        const dist = 20 + Math.random() * 30;
+        
+        fxLayer.appendChild(p);
+
+        let t = 0;
+        function anim() {
+            t += 0.05;
+            const curDist = dist * t;
+            const curX = x + Math.cos(angle) * curDist;
+            const curY = y + Math.sin(angle) * curDist;
+            p.setAttribute("transform", `translate(${curX}, ${curY}) scale(${scale})`);
+            p.style.opacity = 1 - t;
+            if (t < 1) requestAnimationFrame(anim);
+            else p.remove();
+        }
+        anim();
     }
 }
