@@ -1,13 +1,12 @@
 /**
  * Pinky Planarian Garden
- * Version: v1.04 (Stable)
+ * Version: v1.05-local
  */
 
 // --- 1. Constants & Globals ---
 const canvas = document.getElementById('game-canvas');
 const bodiesLayer = document.getElementById('bodies-layer');
 const eyesLayer = document.getElementById('eyes-layer');
-const seaweedLayer = document.getElementById('seaweed-layer');
 const foodLayer = document.getElementById('food-layer');
 const fxLayer = document.getElementById('fx-layer');
 const dirtyLayer = document.getElementById('dirty-layer');
@@ -18,7 +17,6 @@ const PINK_COLORS = ['#ffb7c5', '#ffc0cb', '#ffd1dc', '#ff9aa2', '#ffb3ba', '#e2
 
 let width, height;
 let planarians = [];
-let seaweeds = [];
 let foods = [];
 let currentMode = 'observe';
 let waterPurity = 100;
@@ -273,34 +271,6 @@ class Planarian {
     destroy() { this.bodyGroup.remove(); this.eyeGroup.remove(); }
 }
 
-class Seaweed {
-    constructor(x, y, numNodes = 8) {
-        this.points = []; this.constraints = []; this.nodeDist = 12 + Math.random() * 8;
-        for (let i = 0; i < numNodes; i++) this.points.push(new Point(x, y - i * this.nodeDist, i === 0));
-        for (let i = 0; i < numNodes - 1; i++) this.constraints.push(new Constraint(this.points[i], this.points[i+1], this.nodeDist));
-        this.path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-        this.path.setAttribute("fill", "none"); this.path.setAttribute("stroke", "#b2f2bb");
-        this.path.setAttribute("stroke-width", "8"); this.path.setAttribute("stroke-linecap", "round");
-        seaweedLayer.appendChild(this.path);
-    }
-    update() {
-        const sway = Math.sin(Date.now() * 0.001 + this.points[0].x) * 0.2;
-        for (let i = 1; i < this.points.length; i++) this.points[i].applyForce(sway * i, 0);
-        this.points.forEach(p => {
-            if (distance(p, {x: mouseX, y: mouseY}) < 50) p.applyForce((p.x - mouseX) * 0.1, 0);
-        });
-        this.points.forEach(p => p.update(0.95));
-        for (let i = 0; i < 2; i++) this.constraints.forEach(c => c.resolve());
-        let d = `M ${this.points[0].x} ${this.points[0].y}`;
-        for (let i = 0; i < this.points.length - 1; i++) {
-            const midX = (this.points[i].x + this.points[i+1].x) / 2;
-            const midY = (this.points[i].y + this.points[i+1].y) / 2;
-            d += ` Q ${this.points[i].x} ${this.points[i].y} ${midX} ${midY}`;
-        }
-        this.path.setAttribute("d", d);
-    }
-}
-
 // --- 5. Audio Engine ---
 class AudioEngine {
     constructor() {
@@ -354,7 +324,6 @@ function init() {
         planarians = [];
         for (let i = 0; i < 3; i++) planarians.push(new Planarian(width/2 + (Math.random()-0.5)*100, height/2 + (Math.random()-0.5)*100));
     }
-    for (let i = 0; i < 5; i++) seaweeds.push(new Seaweed((width/6)*(i+1), height));
 
     window.addEventListener('pointerdown', () => audio.start(), { once: true });
     requestAnimationFrame(loop);
@@ -379,67 +348,71 @@ function loop() {
         if (currentMode === 'cut') checkCut(mouseX, mouseY);
         else if (currentMode === 'tease') checkTease(mouseX, mouseY);
     }
-    seaweeds.forEach(s => s.update());
     planarians.forEach(p => p.update());
     requestAnimationFrame(loop);
 }
 
-function saveState() {
-    try {
-        const data = planarians.map(p => ({
-            points: p.points.map(pt => ({x: pt.x, y: pt.y})),
-            hasHead: p.hasHead, color: p.color, nodeDist: p.nodeDist, eatCount: p.eatCount
-        }));
-        localStorage.setItem('pinky_planarian_state', JSON.stringify({ planarians: data, waterPurity: waterPurity }));
-    } catch(e) {}
-}
+// --- 7. Utilities & Events ---
+window.addEventListener('mousemove', (e) => {
+    const rect = canvas.getBoundingClientRect();
+    mouseX = e.clientX - rect.left; mouseY = e.clientY - rect.top;
+});
+canvas.addEventListener('pointerdown', (e) => {
+    isPointerDown = true;
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left, y = e.clientY - rect.top;
+    mouseX = x; mouseY = y;
+    if (currentMode === 'observe') createRipple(x, y);
+    else if (currentMode === 'feed') createFood(x, y);
+    else if (currentMode === 'tease') checkTease(x, y);
+    else if (currentMode === 'bell') triggerBell(x, y);
+    else if (currentMode === 'clean') createBubbles();
+});
+window.addEventListener('pointerup', () => isPointerDown = false);
+window.addEventListener('pointercancel', () => isPointerDown = false);
 
-function loadState() {
-    try {
-        const saved = localStorage.getItem('pinky_planarian_state');
-        if (!saved) return false;
-        const data = JSON.parse(saved);
-        if (!data.planarians || data.planarians.length === 0) return false;
-        waterPurity = data.waterPurity || 100;
-        data.planarians.forEach(d => {
-            const pts = d.points.map(pt => new Point(pt.x, pt.y));
-            const p = new Planarian(0, 0, pts.length, d.nodeDist, pts, d.color);
-            p.hasHead = d.hasHead; p.eatCount = d.eatCount || 0; planarians.push(p);
-        });
-        return true;
-    } catch (e) { return false; }
-}
-
-function createHeartBurst(x, y) {
-    for (let i = 0; i < 6; i++) {
-        const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
-        p.setAttribute("d", "M 10,30 A 20,20 0,0,1 50,30 A 20,20 0,0,1 90,30 Q 90,60 50,90 Q 10,60 10,30 z");
-        p.setAttribute("fill", "#ff4d6d");
-        const s = 0.05 + Math.random()*0.1, a = Math.random()*Math.PI*2, dist = 20+Math.random()*30;
-        fxLayer.appendChild(p);
-        let t = 0;
-        function anim() {
-            t += 0.05; const curD = dist*t;
-            p.setAttribute("transform", `translate(${x + Math.cos(a)*curD}, ${y + Math.sin(a)*curD}) scale(${s})`);
-            p.style.opacity = 1 - t; if (t < 1) requestAnimationFrame(anim); else p.remove();
+document.querySelectorAll('.controls button').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+        e.stopPropagation(); // 防止觸發 canvas 點擊
+        if (btn.id === 'action-reset') {
+            if (confirm('確定要重置養殖場嗎？')) resetGarden();
+            return;
         }
-        anim();
-    }
+        document.querySelectorAll('.controls button').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        currentMode = btn.id.replace('mode-', '');
+    });
+});
+
+function checkTease(x, y) {
+    planarians.forEach(p => p.points.forEach(pt => {
+        if (distance({x, y}, pt) < 50) {
+            pt.applyForce((pt.x - x) * 0.5, (pt.y - y) * 0.5);
+            audio.playTease();
+        }
+    }));
 }
 
-function checkSocial() {
-    const now = Date.now();
-    for (let i = 0; i < planarians.length; i++) {
-        for (let j = i + 1; j < planarians.length; j++) {
-            const p1 = planarians[i], p2 = planarians[j];
-            if (!p1.hasHead || !p2.hasHead) continue;
-            if (distance(p1.points[0], p2.points[0]) < 30 && now - p1.lastKissTime > 5000) {
-                p1.lastKissTime = p2.lastKissTime = now;
-                const mx = (p1.points[0].x + p2.points[0].x)/2, my = (p1.points[0].y + p2.points[0].y)/2;
-                createRipple(mx, my, "#ff4d6d"); createHeartBurst(mx, my); audio.playKiss();
-            }
-        }
-    }
+function triggerBell(x, y) {
+    audio.playBell(); window.bellTarget = {x, y}; createRipple(x, y, "#ff8fa3");
+    setTimeout(() => { window.bellTarget = null; }, 3000);
+}
+
+function createRipple(x, y, color = "rgba(255, 255, 255, 0.5)") {
+    const c = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+    c.setAttribute("cx", x); c.setAttribute("cy", y); c.setAttribute("r", "5");
+    c.setAttribute("class", "ripple"); c.style.stroke = color;
+    fxLayer.appendChild(c);
+    let r = 5, o = 1;
+    function a() { r += 2; o -= 0.02; c.setAttribute("r", r); c.style.opacity = o; if (o > 0) requestAnimationFrame(a); else c.remove(); }
+    a();
+}
+
+function createFood(x, y) {
+    const h = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    h.setAttribute("d", "M 10,30 A 20,20 0,0,1 50,30 A 20,20 0,0,1 90,30 Q 90,60 50,90 Q 10,60 10,30 z");
+    h.setAttribute("transform", `translate(${x - 10}, ${y - 10}) scale(0.2)`);
+    h.setAttribute("class", "heart-food"); foodLayer.appendChild(h); foods.push({x, y});
 }
 
 function checkCut(x, y) {
@@ -508,39 +481,63 @@ function resetGarden() {
     for (let i = 0; i < 3; i++) planarians.push(new Planarian(width/2 + (Math.random()-0.5)*200, height/2 + (Math.random()-0.5)*200));
 }
 
-function createRipple(x, y, color = "rgba(255, 255, 255, 0.5)") {
-    const c = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-    c.setAttribute("cx", x); c.setAttribute("cy", y); c.setAttribute("r", "5");
-    c.setAttribute("class", "ripple"); c.style.stroke = color;
-    fxLayer.appendChild(c);
-    let r = 5, o = 1;
-    function a() { r += 2; o -= 0.02; c.setAttribute("r", r); c.style.opacity = o; if (o > 0) requestAnimationFrame(a); else c.remove(); }
-    a();
+function saveState() {
+    try {
+        const data = planarians.map(p => ({
+            points: p.points.map(pt => ({x: pt.x, y: pt.y})),
+            hasHead: p.hasHead, color: p.color, nodeDist: p.nodeDist, eatCount: p.eatCount
+        }));
+        localStorage.setItem('pinky_planarian_state', JSON.stringify({ planarians: data, waterPurity: waterPurity }));
+    } catch(e) {}
 }
 
-function triggerBell(x, y) {
-    audio.playBell(); window.bellTarget = {x, y}; createRipple(x, y, "#ff8fa3");
-    setTimeout(() => { window.bellTarget = null; }, 3000);
+function loadState() {
+    try {
+        const saved = localStorage.getItem('pinky_planarian_state');
+        if (!saved) return false;
+        const data = JSON.parse(saved);
+        if (!data.planarians || data.planarians.length === 0) return false;
+        waterPurity = data.waterPurity || 100;
+        data.planarians.forEach(d => {
+            const pts = d.points.map(pt => new Point(pt.x, pt.y));
+            const p = new Planarian(0, 0, pts.length, d.nodeDist, pts, d.color);
+            p.hasHead = d.hasHead; p.eatCount = d.eatCount || 0; planarians.push(p);
+        });
+        return true;
+    } catch (e) { return false; }
 }
 
-// --- Interaction Logic ---
-window.addEventListener('mousemove', (e) => {
-    const rect = canvas.getBoundingClientRect();
-    mouseX = e.clientX - rect.left; mouseY = e.clientY - rect.top;
-});
-canvas.addEventListener('pointerdown', (e) => {
-    isPointerDown = true;
-    const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left, y = e.clientY - rect.top;
-    mouseX = x; mouseY = y;
-    if (currentMode === 'observe') createRipple(x, y);
-    else if (currentMode === 'feed') createFood(x, y);
-    else if (currentMode === 'tease') checkTease(x, y);
-    else if (currentMode === 'bell') triggerBell(x, y);
-    else if (currentMode === 'clean') createBubbles();
-});
-window.addEventListener('pointerup', () => isPointerDown = false);
-window.addEventListener('pointercancel', () => isPointerDown = false);
+function createHeartBurst(x, y) {
+    for (let i = 0; i < 6; i++) {
+        const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        p.setAttribute("d", "M 10,30 A 20,20 0,0,1 50,30 A 20,20 0,0,1 90,30 Q 90,60 50,90 Q 10,60 10,30 z");
+        p.setAttribute("fill", "#ff4d6d");
+        const s = 0.05 + Math.random()*0.1, a = Math.random()*Math.PI*2, dist = 20+Math.random()*30;
+        fxLayer.appendChild(p);
+        let t = 0;
+        function anim() {
+            t += 0.05; const curD = dist*t;
+            p.setAttribute("transform", `translate(${x + Math.cos(a)*curD}, ${y + Math.sin(a)*curD}) scale(${s})`);
+            p.style.opacity = 1 - t; if (t < 1) requestAnimationFrame(anim); else p.remove();
+        }
+        anim();
+    }
+}
 
-// --- Start ---
+function checkSocial() {
+    const now = Date.now();
+    for (let i = 0; i < planarians.length; i++) {
+        for (let j = i + 1; j < planarians.length; j++) {
+            const p1 = planarians[i], p2 = planarians[j];
+            if (!p1.hasHead || !p2.hasHead) continue;
+            if (distance(p1.points[0], p2.points[0]) < 30 && now - p1.lastKissTime > 5000) {
+                p1.lastKissTime = p2.lastKissTime = now;
+                const mx = (p1.points[0].x + p2.points[0].x)/2, my = (p1.points[0].y + p2.points[0].y)/2;
+                createRipple(mx, my, "#ff4d6d"); createHeartBurst(mx, my); audio.playKiss();
+            }
+        }
+    }
+}
+
+// --- 8. Start ---
 init();
