@@ -4,7 +4,8 @@
  */
 
 const canvas = document.getElementById('game-canvas');
-const planariansLayer = document.getElementById('planarians-layer');
+const bodiesLayer = document.getElementById('bodies-layer');
+const eyesLayer = document.getElementById('eyes-layer');
 const foodLayer = document.getElementById('food-layer');
 const fxLayer = document.getElementById('fx-layer');
 
@@ -104,27 +105,29 @@ class Planarian {
         // 重新建立物理約束
         this.rebuildConstraints();
 
-        // DOM elements ... (其餘不變)
-        this.group = document.createElementNS("http://www.w3.org/2000/svg", "g");
-        this.group.setAttribute("class", "planarian-group");
-        planariansLayer.appendChild(this.group);
+        // DOM elements: 分成兩個群組以解決濾鏡模糊問題
+        this.bodyGroup = document.createElementNS("http://www.w3.org/2000/svg", "g");
+        bodiesLayer.appendChild(this.bodyGroup);
+
+        this.eyeGroup = document.createElementNS("http://www.w3.org/2000/svg", "g");
+        eyesLayer.appendChild(this.eyeGroup);
 
         this.bodySegments = [];
         for (let i = 0; i < numNodes; i++) {
             const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
             circle.setAttribute("class", "planarian-body");
-            circle.setAttribute("fill", this.color); // 使用個體色彩
+            circle.setAttribute("fill", this.color);
             const radius = Math.max(2, nodeDist * (1 - i / numNodes) * 1.2);
             circle.setAttribute("r", radius);
             this.baseRadii.push(radius);
-            this.group.appendChild(circle);
+            this.bodyGroup.appendChild(circle);
             this.bodySegments.push(circle);
         }
 
         this.head = document.createElementNS("http://www.w3.org/2000/svg", "path");
         this.head.setAttribute("class", "planarian-body");
-        this.head.setAttribute("fill", this.color); // 使用個體色彩
-        this.group.appendChild(this.head);
+        this.head.setAttribute("fill", this.color);
+        this.bodyGroup.appendChild(this.head);
 
         this.eyeWhiteL = document.createElementNS("http://www.w3.org/2000/svg", "circle");
         this.eyeWhiteR = document.createElementNS("http://www.w3.org/2000/svg", "circle");
@@ -132,8 +135,8 @@ class Planarian {
         this.eyeWhiteR.setAttribute("fill", "white");
         this.eyeWhiteL.setAttribute("r", "4.5");
         this.eyeWhiteR.setAttribute("r", "4.5");
-        this.group.appendChild(this.eyeWhiteL);
-        this.group.appendChild(this.eyeWhiteR);
+        this.eyeGroup.appendChild(this.eyeWhiteL);
+        this.eyeGroup.appendChild(this.eyeWhiteR);
 
         this.eyeL = document.createElementNS("http://www.w3.org/2000/svg", "circle");
         this.eyeR = document.createElementNS("http://www.w3.org/2000/svg", "circle");
@@ -141,8 +144,8 @@ class Planarian {
         this.eyeR.setAttribute("class", "planarian-eye");
         this.eyeL.setAttribute("r", "2");
         this.eyeR.setAttribute("r", "2");
-        this.group.appendChild(this.eyeL);
-        this.group.appendChild(this.eyeR);
+        this.eyeGroup.appendChild(this.eyeL);
+        this.eyeGroup.appendChild(this.eyeR);
     }
 
     rebuildConstraints() {
@@ -357,14 +360,14 @@ class Planarian {
             const newRadius = 2 * (1.02 ** this.eatCount);
             circle.setAttribute("r", newRadius);
             this.baseRadii.push(newRadius);
-            this.group.insertBefore(circle, this.head);
+            this.bodyGroup.insertBefore(circle, this.head);
             this.bodySegments.push(circle);
-            }
-            }
-
+        }
+    }
 
     destroy() {
-        this.group.remove();
+        this.bodyGroup.remove();
+        this.eyeGroup.remove();
     }
 }
 
