@@ -1,22 +1,7 @@
 /**
  * Pinky Planarian Garden
- * Version: v1.03-debug
+ * Version: v1.04 (Stable)
  */
-
-// --- 0. Debugger ---
-const debugInfo = {
-    logs: [],
-    log(msg) {
-        console.log(msg);
-        this.logs.push(msg);
-        const el = document.getElementById('debug-console');
-        if (el) el.innerText = this.logs.slice(-5).join('\n');
-    }
-};
-
-window.onerror = function(msg, url, line) {
-    debugInfo.log(`ERR: ${msg} (at ${line})`);
-};
 
 // --- 1. Constants & Globals ---
 const canvas = document.getElementById('game-canvas');
@@ -42,7 +27,10 @@ let isPointerDown = false;
 let saveTimer = 0;
 let socialTimer = 0;
 
-// --- 2. Physics Engine ---
+// --- 2. Utilities ---
+const distance = (p1, p2) => Math.sqrt((p1.x - p2.x) ** 2 + (p1.y - p2.y) ** 2);
+
+// --- 3. Physics Engine ---
 class Point {
     constructor(x, y, isStatic = false) {
         this.x = x; this.y = y;
@@ -79,7 +67,7 @@ class Constraint {
     }
 }
 
-// --- 3. Biological Classes ---
+// --- 4. Biological Classes ---
 class Planarian {
     constructor(x, y, numNodes = 7, nodeDist = 15, existingPoints = null, color = null) {
         this.points = existingPoints || [];
@@ -313,7 +301,7 @@ class Seaweed {
     }
 }
 
-// --- 4. Audio Engine ---
+// --- 5. Audio Engine ---
 class AudioEngine {
     constructor() {
         this.ctx = null; this.isStarted = false;
@@ -351,36 +339,24 @@ class AudioEngine {
 
 const audio = new AudioEngine();
 
-// --- 5. Logic & Initialization ---
+// --- 6. Logic & Initialization ---
 function resize() {
     width = window.innerWidth; height = window.innerHeight;
     canvas.setAttribute("viewBox", `0 0 ${width} ${height}`);
-    debugInfo.log(`Resized: ${width}x${height}`);
 }
 
 function init() {
-    debugInfo.log("Initializing...");
     resize();
-    if (width <= 0 || height <= 0) { 
-        debugInfo.log("Width/Height is zero, retrying...");
-        setTimeout(init, 500); return; 
-    }
+    if (width <= 0 || height <= 0) { setTimeout(init, 100); return; }
     window.addEventListener('resize', resize);
 
-    try {
-        if (!loadState()) {
-            debugInfo.log("No save state found, creating initials...");
-            for (let i = 0; i < 3; i++) planarians.push(new Planarian(width/2, height/2));
-        }
-        debugInfo.log(`Planarians: ${planarians.length}`);
-        for (let i = 0; i < 5; i++) seaweeds.push(new Seaweed((width/6)*(i+1), height));
-        debugInfo.log(`Seaweeds: ${seaweeds.length}`);
-    } catch(e) {
-        debugInfo.log(`Init Error: ${e.message}`);
+    if (!loadState() || planarians.length === 0) {
+        planarians = [];
+        for (let i = 0; i < 3; i++) planarians.push(new Planarian(width/2 + (Math.random()-0.5)*100, height/2 + (Math.random()-0.5)*100));
     }
+    for (let i = 0; i < 5; i++) seaweeds.push(new Seaweed((width/6)*(i+1), height));
 
     window.addEventListener('pointerdown', () => audio.start(), { once: true });
-    debugInfo.log("Starting Loop...");
     requestAnimationFrame(loop);
 }
 
@@ -408,7 +384,6 @@ function loop() {
     requestAnimationFrame(loop);
 }
 
-// --- 6. Utilities & Events ---
 function saveState() {
     try {
         const data = planarians.map(p => ({
@@ -416,7 +391,7 @@ function saveState() {
             hasHead: p.hasHead, color: p.color, nodeDist: p.nodeDist, eatCount: p.eatCount
         }));
         localStorage.setItem('pinky_planarian_state', JSON.stringify({ planarians: data, waterPurity: waterPurity }));
-    } catch(e) { debugInfo.log("Save Fail"); }
+    } catch(e) {}
 }
 
 function loadState() {
@@ -424,6 +399,7 @@ function loadState() {
         const saved = localStorage.getItem('pinky_planarian_state');
         if (!saved) return false;
         const data = JSON.parse(saved);
+        if (!data.planarians || data.planarians.length === 0) return false;
         waterPurity = data.waterPurity || 100;
         data.planarians.forEach(d => {
             const pts = d.points.map(pt => new Point(pt.x, pt.y));
@@ -547,11 +523,24 @@ function triggerBell(x, y) {
     setTimeout(() => { window.bellTarget = null; }, 3000);
 }
 
-// --- Interaction Logic (Mouse) ---
+// --- Interaction Logic ---
 window.addEventListener('mousemove', (e) => {
     const rect = canvas.getBoundingClientRect();
     mouseX = e.clientX - rect.left; mouseY = e.clientY - rect.top;
 });
+canvas.addEventListener('pointerdown', (e) => {
+    isPointerDown = true;
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left, y = e.clientY - rect.top;
+    mouseX = x; mouseY = y;
+    if (currentMode === 'observe') createRipple(x, y);
+    else if (currentMode === 'feed') createFood(x, y);
+    else if (currentMode === 'tease') checkTease(x, y);
+    else if (currentMode === 'bell') triggerBell(x, y);
+    else if (currentMode === 'clean') createBubbles();
+});
+window.addEventListener('pointerup', () => isPointerDown = false);
+window.addEventListener('pointercancel', () => isPointerDown = false);
 
 // --- Start ---
 init();
