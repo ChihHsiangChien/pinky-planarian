@@ -1,89 +1,71 @@
 /**
- * 粉萌渦蟲養殖場 (Pinky Planarian Garden)
+ * Pinky Planarian Garden
+ * Version: v1.02
  * Core Physics: Verlet Integration
  */
 
+// --- 1. Constants & Globals ---
 const canvas = document.getElementById('game-canvas');
 const bodiesLayer = document.getElementById('bodies-layer');
 const eyesLayer = document.getElementById('eyes-layer');
 const seaweedLayer = document.getElementById('seaweed-layer');
 const foodLayer = document.getElementById('food-layer');
 const fxLayer = document.getElementById('fx-layer');
+const dirtyLayer = document.getElementById('dirty-layer');
+const statCount = document.getElementById('stat-count');
+const statPurity = document.getElementById('stat-purity');
+
+const PINK_COLORS = ['#ffb7c5', '#ffc0cb', '#ffd1dc', '#ff9aa2', '#ffb3ba', '#e2bbfd'];
 
 let width, height;
 let planarians = [];
 let seaweeds = [];
 let foods = [];
-let currentMode = 'observe'; // observe, feed, cut, tease, bell, clean
+let currentMode = 'observe';
 let waterPurity = 100;
 let mouseX = 0, mouseY = 0;
 let isPointerDown = false;
+let saveTimer = 0;
+let socialTimer = 0;
 
-const dirtyLayer = document.getElementById('dirty-layer');
-const statCount = document.getElementById('stat-count');
-const statPurity = document.getElementById('stat-purity');
-
-// --- Utilities ---
-const distance = (p1, p2) => Math.sqrt((p1.x - p2.x) ** 2 + (p1.y - p2.y) ** 2);
-
-// --- Verlet Physics ---
+// --- 2. Physics Engine ---
 class Point {
     constructor(x, y, isStatic = false) {
-        this.x = x;
-        this.y = y;
-        this.oldX = x;
-        this.oldY = y;
+        this.x = x; this.y = y;
+        this.oldX = x; this.oldY = y;
         this.isStatic = isStatic;
     }
-
     update(friction = 0.98, gravity = 0) {
         if (this.isStatic) return;
-
         const vx = (this.x - this.oldX) * friction;
         const vy = (this.y - this.oldY) * friction;
-
-        this.oldX = this.x;
-        this.oldY = this.y;
-        this.x += vx;
-        this.y += vy + gravity;
+        this.oldX = this.x; this.oldY = this.y;
+        this.x += vx; this.y += vy + gravity;
     }
-
     applyForce(fx, fy) {
         if (this.isStatic) return;
-        this.x += fx;
-        this.y += fy;
+        this.x += fx; this.y += fy;
     }
 }
 
 class Constraint {
     constructor(p1, p2, length) {
-        this.p1 = p1;
-        this.p2 = p2;
+        this.p1 = p1; this.p2 = p2;
         this.length = length;
     }
-
     resolve() {
         const dx = this.p2.x - this.p1.x;
         const dy = this.p2.y - this.p1.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
+        const dist = Math.sqrt(dx * dx + dy * dy) || 0.1;
         const diff = (this.length - dist) / dist;
         const offsetX = dx * diff * 0.5;
         const offsetY = dy * diff * 0.5;
-
-        if (!this.p1.isStatic) {
-            this.p1.x -= offsetX;
-            this.p1.y -= offsetY;
-        }
-        if (!this.p2.isStatic) {
-            this.p2.x += offsetX;
-            this.p2.y += offsetY;
-        }
+        if (!this.p1.isStatic) { this.p1.x -= offsetX; this.p1.y -= offsetY; }
+        if (!this.p2.isStatic) { this.p2.x += offsetX; this.p2.y += offsetY; }
     }
 }
 
-// --- Planarian ---
-const PINK_COLORS = ['#ffb7c5', '#ffc0cb', '#ffd1dc', '#ff9aa2', '#ffb3ba', '#e2bbfd'];
-
+// --- 3. Biological Classes ---
 class Planarian {
     constructor(x, y, numNodes = 7, nodeDist = 15, existingPoints = null, color = null) {
         this.points = existingPoints || [];
@@ -97,32 +79,26 @@ class Planarian {
         this.nodeDist = nodeDist;
         this.baseRadii = [];
         this.color = color || PINK_COLORS[Math.floor(Math.random() * PINK_COLORS.length)];
-        this.lastKissTime = 0; // 防止過度頻繁親親
+        this.lastKissTime = 0;
 
-
-        // 如果沒有傳入現有節點，則初始化新節點
         if (this.points.length === 0) {
             for (let i = 0; i < numNodes; i++) {
                 this.points.push(new Point(x + i * nodeDist, y));
             }
         }
-
-        // 重新建立物理約束
         this.rebuildConstraints();
 
-        // DOM elements: 分成兩個群組以解決濾鏡模糊問題
         this.bodyGroup = document.createElementNS("http://www.w3.org/2000/svg", "g");
         bodiesLayer.appendChild(this.bodyGroup);
-
         this.eyeGroup = document.createElementNS("http://www.w3.org/2000/svg", "g");
         eyesLayer.appendChild(this.eyeGroup);
 
         this.bodySegments = [];
-        for (let i = 0; i < numNodes; i++) {
+        for (let i = 0; i < this.points.length; i++) {
             const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
             circle.setAttribute("class", "planarian-body");
             circle.setAttribute("fill", this.color);
-            const radius = Math.max(2, nodeDist * (1 - i / numNodes) * 1.2);
+            const radius = Math.max(2, nodeDist * (1 - i / this.points.length) * 1.2);
             circle.setAttribute("r", radius);
             this.baseRadii.push(radius);
             this.bodyGroup.appendChild(circle);
@@ -130,7 +106,6 @@ class Planarian {
         }
 
         this.head = document.createElementNS("http://www.w3.org/2000/svg", "path");
-        this.head.setAttribute("class", "planarian-body");
         this.head.setAttribute("fill", this.color);
         this.bodyGroup.appendChild(this.head);
 
@@ -156,96 +131,62 @@ class Planarian {
     rebuildConstraints() {
         this.constraints = [];
         for (let i = 0; i < this.points.length - 1; i++) {
-            this.constraints.push(new Constraint(this.points[i], this.points[i + 1], this.nodeDist));
+            this.constraints.push(new Constraint(this.points[i], this.points[i+1], this.nodeDist));
         }
     }
 
     update() {
-        // Stun logic
         if (this.stunTimer > 0) {
             this.stunTimer--;
-            // Apply heavy friction during stun
-            this.points.forEach(p => {
-                p.oldX = p.x;
-                p.oldY = p.y;
-            });
+            this.points.forEach(p => { p.oldX = p.x; p.oldY = p.y; });
         }
 
-        // Regeneration logic
         if (!this.hasHead) {
-            this.regrowTimer += 1;
-            if (this.regrowTimer > 1800) { // ~30 seconds
-                this.hasHead = true;
-                this.regrowTimer = 0;
-            }
+            if (++this.regrowTimer > 1800) { this.hasHead = true; this.regrowTimer = 0; }
         }
 
-        // Biological Shrink (v0.09)
-        // If not eating or water is dirty, shrink very slowly
         const shrinkRate = 0.00005 * (1 + (100 - waterPurity) / 50);
         this.baseRadii = this.baseRadii.map(r => Math.max(1.5, r * (1 - shrinkRate)));
         this.constraints.forEach(c => c.length = Math.max(5, c.length * (1 - shrinkRate)));
 
-        // Movement (Wander, Seek food, or Seek Bell)
         if (this.hasHead && this.stunTimer === 0) {
             let foundTarget = false;
             const head = this.points[0];
-
-            // Environment effect: Water Purity and Night affect speed
             const nightFactor = window.isNight ? 0.4 : 1.0;
             const healthFactor = (0.3 + (waterPurity / 100) * 0.7) * nightFactor;
             const currentSpeed = this.speed * healthFactor;
-            // 0. Observe Curiosity
+
             if (currentMode === 'observe') {
                 const d = distance(head, {x: mouseX, y: mouseY});
                 if (d < 150) {
-                    const dx = mouseX - head.x;
-                    const dy = mouseY - head.y;
-                    const angle = Math.atan2(dy, dx);
-                    // Slow down and look at mouse
+                    const angle = Math.atan2(mouseY - head.y, mouseX - head.x);
                     head.applyForce(Math.cos(angle) * 0.2, Math.sin(angle) * 0.2);
                     this.angle = angle;
                     foundTarget = true;
                 }
             }
 
-            // 1. Seek Bell
             if (window.bellTarget) {
-                const d = distance(head, window.bellTarget);
                 const dx = window.bellTarget.x - head.x;
                 const dy = window.bellTarget.y - head.y;
                 const angle = Math.atan2(dy, dx);
                 head.applyForce(Math.cos(angle) * 0.8 * healthFactor, Math.sin(angle) * 0.8 * healthFactor);
                 foundTarget = true;
-            } 
-            // 2. Seek Food
-            else if (foods.length > 0) {
-                let nearest = null;
-                let minDist = Infinity;
+            } else if (foods.length > 0) {
+                let nearest = null, minDist = Infinity;
                 foods.forEach(f => {
                     const d = distance(head, f);
-                    if (d < minDist) {
-                        minDist = d;
-                        nearest = f;
-                    }
+                    if (d < minDist) { minDist = d; nearest = f; }
                 });
-
                 if (minDist < 300) {
-                    const dx = nearest.x - head.x;
-                    const dy = nearest.y - head.y;
-                    const angle = Math.atan2(dy, dx);
+                    const angle = Math.atan2(nearest.y - head.y, nearest.x - head.x);
                     head.applyForce(Math.cos(angle) * 0.5 * healthFactor, Math.sin(angle) * 0.5 * healthFactor);
                     foundTarget = true;
-
                     if (minDist < 15) {
                         const idx = foods.indexOf(nearest);
                         if (idx > -1) {
-                            foods.splice(idx, 1);
-                            foodLayer.children[idx].remove();
-                            this.grow();
-                            audio.playEat();
-                            createHeartBurst(nearest.x, nearest.y);
-                            // Eating makes water slightly dirtier
+                            foods.splice(idx, 1); foodLayer.children[idx].remove();
+                            this.grow(); audio.playEat(); createHeartBurst(nearest.x, nearest.y);
                             waterPurity = Math.max(0, waterPurity - 5);
                         }
                     }
@@ -257,32 +198,21 @@ class Planarian {
                 head.applyForce(Math.cos(this.angle) * currentSpeed, Math.sin(this.angle) * currentSpeed);
             }
 
-            // --- Fear of Corners (Avoid sticking to edges) ---
             const margin = 100;
-            const turnForce = 0.4;
-            if (head.x < margin) head.applyForce(turnForce * (1 - head.x/margin), 0);
-            if (head.x > width - margin) head.applyForce(-turnForce * (1 - (width - head.x)/margin), 0);
-            if (head.y < margin) head.applyForce(0, turnForce * (1 - head.y/margin));
-            if (head.y > height - margin) head.applyForce(0, -turnForce * (1 - (height - head.y)/margin));
+            if (head.x < margin) head.applyForce(0.4 * (1 - head.x/margin), 0);
+            if (head.x > width - margin) head.applyForce(-0.4 * (1 - (width - head.x)/margin), 0);
+            if (head.y < margin) head.applyForce(0, 0.4 * (1 - head.y/margin));
+            if (head.y > height - margin) head.applyForce(0, -0.4 * (1 - (height - head.y)/margin));
         }
 
-        // Verlet steps
         this.points.forEach(p => p.update());
-        // v0.03: 2 iterations is enough
-        for (let i = 0; i < 2; i++) {
-            this.constraints.forEach(c => c.resolve());
-        }
-
+        for (let i = 0; i < 2; i++) this.constraints.forEach(c => c.resolve());
         this.render();
     }
 
     render() {
         if (this.points.length < 2) return;
-
-        // Pulse effect on radius (lighter than CSS transform)
         const pulse = 1 + Math.sin(Date.now() * 0.005) * 0.05;
-
-        // Update body segments (circles)
         this.points.forEach((p, i) => {
             if (this.bodySegments[i]) {
                 this.bodySegments[i].setAttribute("cx", p.x);
@@ -291,64 +221,35 @@ class Planarian {
             }
         });
 
-        // Draw spade head
         if (this.hasHead) {
-            const h = this.points[0];
-            const n = this.points[1];
+            const h = this.points[0], n = this.points[1];
             const angle = Math.atan2(h.y - n.y, h.x - n.x);
-            
-            const headSize = 18;
-            const auricleAngle = 0.8; // Angle for the "ears"
-            
-            const x1 = h.x + Math.cos(angle) * headSize;
-            const y1 = h.y + Math.sin(angle) * headSize;
-            
-            const x2 = h.x + Math.cos(angle - auricleAngle) * headSize * 0.8;
-            const y2 = h.y + Math.sin(angle - auricleAngle) * headSize * 0.8;
-            
-            const x3 = h.x + Math.cos(angle + auricleAngle) * headSize * 0.8;
-            const y3 = h.y + Math.sin(angle + auricleAngle) * headSize * 0.8;
-
-            const d = `M ${x1} ${y1} L ${x2} ${y2} L ${h.x} ${h.y} L ${x3} ${y3} Z`;
-            this.head.setAttribute("d", d);
+            const headSize = 18, auricleAngle = 0.8;
+            const x1 = h.x + Math.cos(angle) * headSize, y1 = h.y + Math.sin(angle) * headSize;
+            const x2 = h.x + Math.cos(angle - auricleAngle) * headSize * 0.8, y2 = h.y + Math.sin(angle - auricleAngle) * headSize * 0.8;
+            const x3 = h.x + Math.cos(angle + auricleAngle) * headSize * 0.8, y3 = h.y + Math.sin(angle + auricleAngle) * headSize * 0.8;
+            this.head.setAttribute("d", `M ${x1} ${y1} L ${x2} ${y2} L ${h.x} ${h.y} L ${x3} ${y3} Z`);
             this.head.style.display = "block";
 
-            // Eyes position
-            const eyeDist = 12; // Wider apart
-            const eyeForward = 6;
-            
-            // White part (Sclera)
+            const eyeDist = 12, eyeForward = 6;
             const lwx = h.x + Math.cos(angle) * eyeForward - Math.sin(angle) * eyeDist/2;
             const lwy = h.y + Math.sin(angle) * eyeForward + Math.cos(angle) * eyeDist/2;
             const rwx = h.x + Math.cos(angle) * eyeForward + Math.sin(angle) * eyeDist/2;
             const rwy = h.y + Math.sin(angle) * eyeForward - Math.cos(angle) * eyeDist/2;
+            this.eyeWhiteL.setAttribute("cx", lwx); this.eyeWhiteL.setAttribute("cy", lwy);
+            this.eyeWhiteR.setAttribute("cx", rwx); this.eyeWhiteR.setAttribute("cy", rwy);
+            this.eyeWhiteL.style.display = this.eyeWhiteR.style.display = "block";
 
-            this.eyeWhiteL.setAttribute("cx", lwx);
-            this.eyeWhiteL.setAttribute("cy", lwy);
-            this.eyeWhiteR.setAttribute("cx", rwx);
-            this.eyeWhiteR.setAttribute("cy", rwy);
-            this.eyeWhiteL.style.display = "block";
-            this.eyeWhiteR.style.display = "block";
-
-            // Black part (Pupil) - slightly inward for a "derpy" look
             const pupilInward = 1.5;
-            const lx = lwx + Math.sin(angle) * pupilInward;
-            const ly = lwy - Math.cos(angle) * pupilInward;
-            const rx = rwx - Math.sin(angle) * pupilInward;
-            const ry = rwy + Math.cos(angle) * pupilInward;
-
-            this.eyeL.setAttribute("cx", lx);
-            this.eyeL.setAttribute("cy", ly);
-            this.eyeR.setAttribute("cx", rx);
-            this.eyeR.setAttribute("cy", ry);
-            this.eyeL.style.display = "block";
-            this.eyeR.style.display = "block";
+            this.eyeL.setAttribute("cx", lwx + Math.sin(angle) * pupilInward);
+            this.eyeL.setAttribute("cy", lwy - Math.cos(angle) * pupilInward);
+            this.eyeR.setAttribute("cx", rwx - Math.sin(angle) * pupilInward);
+            this.eyeR.setAttribute("cy", rwy + Math.cos(angle) * pupilInward);
+            this.eyeL.style.display = this.eyeR.style.display = "block";
         } else {
             this.head.style.display = "none";
-            this.eyeWhiteL.style.display = "none";
-            this.eyeWhiteR.style.display = "none";
-            this.eyeL.style.display = "none";
-            this.eyeR.style.display = "none";
+            this.eyeWhiteL.style.display = this.eyeWhiteR.style.display = "none";
+            this.eyeL.style.display = this.eyeR.style.display = "none";
         }
     }
 
@@ -356,333 +257,211 @@ class Planarian {
         this.eatCount++;
         this.constraints.forEach(c => c.length *= 1.02);
         this.baseRadii = this.baseRadii.map(r => r * 1.02);
-
-        // 每吃 3 次，長出一個新節點
         if (this.eatCount % 3 === 0) {
-            const lastPoint = this.points[this.points.length - 1];
-            const secondLast = this.points[this.points.length - 2];
-            
-            const dx = lastPoint.x - secondLast.x;
-            const dy = lastPoint.y - secondLast.y;
-            const newPoint = new Point(lastPoint.x + dx, lastPoint.y + dy);
+            const lp = this.points[this.points.length - 1], slp = this.points[this.points.length - 2];
+            const newPoint = new Point(lp.x + (lp.x - slp.x), lp.y + (lp.y - slp.y));
             this.points.push(newPoint);
-            this.constraints.push(new Constraint(lastPoint, newPoint, this.nodeDist));
-            // 增加新 DOM 節點
+            this.constraints.push(new Constraint(lp, newPoint, this.nodeDist));
             const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-            circle.setAttribute("class", "planarian-body");
-            circle.setAttribute("fill", this.color); // 保持色彩一致
-            const newRadius = 2 * (1.02 ** this.eatCount);
-            circle.setAttribute("r", newRadius);
-            this.baseRadii.push(newRadius);
-            this.bodyGroup.insertBefore(circle, this.head);
-            this.bodySegments.push(circle);
+            circle.setAttribute("class", "planarian-body"); circle.setAttribute("fill", this.color);
+            const r = 2 * (1.02 ** this.eatCount); circle.setAttribute("r", r);
+            this.baseRadii.push(r); this.bodyGroup.insertBefore(circle, this.head); this.bodySegments.push(circle);
         }
     }
+    destroy() { this.bodyGroup.remove(); this.eyeGroup.remove(); }
+}
 
-    destroy() {
-        this.bodyGroup.remove();
-        this.eyeGroup.remove();
+class Seaweed {
+    constructor(x, y, numNodes = 8) {
+        this.points = []; this.constraints = []; this.nodeDist = 12 + Math.random() * 8;
+        for (let i = 0; i < numNodes; i++) this.points.push(new Point(x, y - i * this.nodeDist, i === 0));
+        for (let i = 0; i < numNodes - 1; i++) this.constraints.push(new Constraint(this.points[i], this.points[i+1], this.nodeDist));
+        this.path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        this.path.setAttribute("fill", "none"); this.path.setAttribute("stroke", "#b2f2bb");
+        this.path.setAttribute("stroke-width", "8"); this.path.setAttribute("stroke-linecap", "round");
+        seaweedLayer.appendChild(this.path);
+    }
+    update() {
+        const sway = Math.sin(Date.now() * 0.001 + this.points[0].x) * 0.2;
+        for (let i = 1; i < this.points.length; i++) this.points[i].applyForce(sway * i, 0);
+        this.points.forEach(p => {
+            if (distance(p, {x: mouseX, y: mouseY}) < 50) p.applyForce((p.x - mouseX) * 0.1, 0);
+        });
+        this.points.forEach(p => p.update(0.95));
+        for (let i = 0; i < 2; i++) this.constraints.forEach(c => c.resolve());
+        let d = `M ${this.points[0].x} ${this.points[0].y}`;
+        for (let i = 0; i < this.points.length - 1; i++) {
+            const midX = (this.points[i].x + this.points[i+1].x) / 2;
+            const midY = (this.points[i].y + this.points[i+1].y) / 2;
+            d += ` Q ${this.points[i].x} ${this.points[i].y} ${midX} ${midY}`;
+        }
+        this.path.setAttribute("d", d);
     }
 }
 
-// --- Audio Engine ---
+// --- 4. Audio Engine ---
 class AudioEngine {
     constructor() {
-        this.ctx = null;
-        this.isStarted = false;
-        // 更豐富的音階：C Major 9 (C, E, G, B, D)
+        this.ctx = null; this.isStarted = false;
         this.scale = [261.63, 329.63, 392.00, 493.88, 587.33, 659.25, 783.99];
     }
-
     start() {
         if (this.isStarted) return;
         this.ctx = new (window.AudioContext || window.webkitAudioContext)();
-        this.isStarted = true;
-        this.playBGM();
+        this.isStarted = true; this.playBGM();
     }
-
     playBGM() {
-        const playTick = (step) => {
+        const tick = (step) => {
             const now = this.ctx.currentTime;
-            
-            // Bass line (every 1st beat)
-            if (step % 3 === 0) {
-                this.playNote(this.scale[0] / 2, now, 0.15, 1.5, 'sine');
-            }
-
-            // Arpeggio
+            if (step % 3 === 0) this.playNote(this.scale[0] / 2, now, 0.15, 1.5, 'sine');
             this.playNote(this.scale[step % this.scale.length], now, 0.08, 0.4);
-            
-            // Random Melody (sometimes)
-            if (Math.random() > 0.7) {
-                this.playNote(this.scale[Math.floor(Math.random() * this.scale.length)] * 2, now + 0.25, 0.05, 0.2);
-            }
-            
-            setTimeout(() => playTick(step + 1), 500);
+            if (Math.random() > 0.7) this.playNote(this.scale[Math.floor(Math.random() * this.scale.length)] * 2, now + 0.25, 0.05, 0.2);
+            setTimeout(() => tick(step + 1), 500);
         };
-        playTick(0);
+        tick(0);
     }
-
-    playNote(freq, time, volume, duration, type = 'triangle') {
-        const osc = this.ctx.createOscillator();
-        const gain = this.ctx.createGain();
-        osc.type = type;
-        osc.frequency.setValueAtTime(freq, time);
-        gain.gain.setValueAtTime(volume, time);
-        gain.gain.exponentialRampToValueAtTime(0.001, time + duration);
-        osc.connect(gain);
-        gain.connect(this.ctx.destination);
-        osc.start(time);
-        osc.stop(time + duration);
+    playNote(freq, time, vol, dur, type = 'triangle') {
+        const osc = this.ctx.createOscillator(); const g = this.ctx.createGain();
+        osc.type = type; osc.frequency.setValueAtTime(freq, time);
+        g.gain.setValueAtTime(vol, time); g.gain.exponentialRampToValueAtTime(0.001, time + dur);
+        osc.connect(g); g.connect(this.ctx.destination);
+        osc.start(time); osc.stop(time + dur);
     }
-
-    playCut() { 
-        // 隨機高音，像碎掉的玻璃聲
-        const freq = 1000 + Math.random() * 1000;
-        this.playNote(freq, this.ctx.currentTime, 0.2, 0.1, 'square'); 
-    }
-    playEat() { 
-        this.playNote(783.99, this.ctx.currentTime, 0.2, 0.3); // G5
-        this.playNote(1046.50, this.ctx.currentTime + 0.1, 0.1, 0.2); // C6
-    }
-    playClean() {
-        for(let i=0; i<8; i++) {
-            this.playNote(400 + Math.random() * 800, this.ctx.currentTime + i * 0.05, 0.05, 0.1, 'sine');
-        }
-    }
+    playCut() { this.playNote(1000 + Math.random() * 1000, this.ctx.currentTime, 0.2, 0.1, 'square'); }
+    playEat() { this.playNote(783.99, this.ctx.currentTime, 0.2, 0.3); this.playNote(1046.5, this.ctx.currentTime + 0.1, 0.1, 0.2); }
+    playClean() { for(let i=0; i<8; i++) this.playNote(400 + Math.random() * 800, this.ctx.currentTime + i * 0.05, 0.05, 0.1, 'sine'); }
     playTease() { this.playNote(880 + Math.random() * 400, this.ctx.currentTime, 0.1, 0.1, 'sine'); }
-    playBell() {
-        const now = this.ctx.currentTime;
-        this.playNote(1567.98, now, 0.2, 0.5); // G6
-        this.playNote(1318.51, now + 0.1, 0.1, 0.4); // E6
-    }
-    playKiss() {
-        const now = this.ctx.currentTime;
-        this.playNote(1174.66, now, 0.1, 0.1, 'sine'); // D6
-        this.playNote(1567.98, now + 0.05, 0.1, 0.2, 'sine'); // G6
-    }
+    playBell() { const n = this.ctx.currentTime; this.playNote(1567.98, n, 0.2, 0.5); this.playNote(1318.51, n + 0.1, 0.1, 0.4); }
+    playKiss() { const n = this.ctx.currentTime; this.playNote(1174.66, n, 0.1, 0.1, 'sine'); this.playNote(1567.98, n + 0.05, 0.1, 0.2, 'sine'); }
 }
 
 const audio = new AudioEngine();
 
-// --- Initialization & Loop ---
+// --- 5. Logic & Initialization ---
 function resize() {
-    width = window.innerWidth;
-    height = window.innerHeight;
+    width = window.innerWidth; height = window.innerHeight;
     canvas.setAttribute("viewBox", `0 0 ${width} ${height}`);
 }
 
 function init() {
     resize();
-    // 確保 width/height 有效
-    if (width <= 0 || height <= 0) {
-        setTimeout(init, 100);
-        return;
-    }
-
+    if (width <= 0 || height <= 0) { setTimeout(init, 100); return; }
     window.addEventListener('resize', resize);
 
-    // Try to load saved state
     if (!loadState()) {
-        // Initial planarians if no save found
-        for (let i = 0; i < 3; i++) {
-            planarians.push(new Planarian(width / 2 + (Math.random() - 0.5) * 100, height / 2 + (Math.random() - 0.5) * 100));
-        }
+        for (let i = 0; i < 3; i++) planarians.push(new Planarian(width/2 + (Math.random()-0.5)*100, height/2 + (Math.random()-0.5)*100));
     }
+    for (let i = 0; i < 5; i++) seaweeds.push(new Seaweed((width/6)*(i+1), height));
 
-    // Initialize Seaweed (v0.10)
-    for (let i = 0; i < 5; i++) {
-        seaweeds.push(new Seaweed((width / 6) * (i + 1), height));
-    }
-
-    // Audio start on first click
     window.addEventListener('pointerdown', () => audio.start(), { once: true });
-
     requestAnimationFrame(loop);
 }
 
-let saveTimer = 0;
-let socialTimer = 0;
 function loop() {
-    // Water slowly gets dirty
     waterPurity = Math.max(0, waterPurity - 0.01);
     dirtyLayer.setAttribute("opacity", (1 - waterPurity / 100) * 0.3);
-
-    // v0.10: Day/Night Cycle (Every 2 minutes full cycle)
-    const time = (Date.now() / 120000) % 1; 
-    let bgColor, lightIntensity;
-    
-    if (time < 0.4) { // Day
-        bgColor = `hsl(187, 60%, ${92 + Math.sin(time * 10) * 2}%)`;
-        window.isNight = false;
-    } else if (time < 0.6) { // Sunset
-        const t = (time - 0.4) / 0.2;
-        bgColor = `hsl(${187 - t * 160}, ${60 + t * 20}%, ${92 - t * 40}%)`;
-        window.isNight = t > 0.5;
-    } else if (time < 0.9) { // Night
-        bgColor = `hsl(27, 80%, 30%)`;
-        window.isNight = true;
-    } else { // Sunrise
-        const t = (time - 0.9) / 0.1;
-        bgColor = `hsl(${27 + t * 160}, ${80 - t * 20}%, ${30 + t * 62}%)`;
-        window.isNight = false;
-    }
-    canvas.style.backgroundColor = bgColor;
-
-    // Update stats UI
     statCount.innerText = planarians.length;
     statPurity.innerText = Math.round(waterPurity) + '%';
 
-    // v0.09: Social logic
-    socialTimer++;
-    if (socialTimer > 10) {
-        checkSocial();
-        socialTimer = 0;
-    }
+    const time = (Date.now() / 120000) % 1;
+    if (time < 0.4) { canvas.style.backgroundColor = `hsl(187, 60%, ${92 + Math.sin(time * 10) * 2}%)`; window.isNight = false; }
+    else if (time < 0.6) { const t = (time-0.4)/0.2; canvas.style.backgroundColor = `hsl(${187-t*160}, ${60+t*20}%, ${92-t*40}%)`; window.isNight = t > 0.5; }
+    else if (time < 0.9) { canvas.style.backgroundColor = `hsl(27, 80%, 30%)`; window.isNight = true; }
+    else { const t = (time-0.9)/0.1; canvas.style.backgroundColor = `hsl(${27+t*160}, ${80-t*20}%, ${30+t*62}%)`; window.isNight = false; }
 
-    // v0.04: Save logic
-    saveTimer++;
-    if (saveTimer > 300) {
-        saveState();
-        saveTimer = 0;
-    }
+    if (++socialTimer > 10) { checkSocial(); socialTimer = 0; }
+    if (++saveTimer > 300) { saveState(); saveTimer = 0; }
 
-    // Throttled logic
     if (isPointerDown) {
         if (currentMode === 'cut') checkCut(mouseX, mouseY);
         else if (currentMode === 'tease') checkTease(mouseX, mouseY);
     }
-
     seaweeds.forEach(s => s.update());
     planarians.forEach(p => p.update());
     requestAnimationFrame(loop);
 }
 
-// --- Interaction ---
-window.addEventListener('pointermove', (e) => {
+// --- 6. Utilities & Events ---
+window.addEventListener('mousemove', (e) => {
     const rect = canvas.getBoundingClientRect();
-    mouseX = e.clientX - rect.left;
-    mouseY = e.clientY - rect.top;
+    mouseX = e.clientX - rect.left; mouseY = e.clientY - rect.top;
 });
-
 canvas.addEventListener('pointerdown', (e) => {
     isPointerDown = true;
     const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    mouseX = x;
-    mouseY = y;
-
-    if (currentMode === 'observe') {
-        createRipple(x, y);
-    } else if (currentMode === 'feed') {
-        createFood(x, y);
-    } else if (currentMode === 'tease') {
-        checkTease(x, y);
-    } else if (currentMode === 'bell') {
-        triggerBell(x, y);
-    } else if (currentMode === 'clean') {
-        createBubbles();
-    }
+    const x = e.clientX - rect.left, y = e.clientY - rect.top;
+    mouseX = x; mouseY = y;
+    if (currentMode === 'observe') createRipple(x, y);
+    else if (currentMode === 'feed') createFood(x, y);
+    else if (currentMode === 'tease') checkTease(x, y);
+    else if (currentMode === 'bell') triggerBell(x, y);
+    else if (currentMode === 'clean') createBubbles();
 });
-
 window.addEventListener('pointerup', () => isPointerDown = false);
 window.addEventListener('pointercancel', () => isPointerDown = false);
 
-function checkTease(x, y) {
-    planarians.forEach(p => {
-        p.points.forEach(point => {
-            const d = distance({x, y}, point);
-            if (d < 50) {
-                const dx = point.x - x;
-                const dy = point.y - y;
-                const angle = Math.atan2(dy, dx);
-                point.applyForce(Math.cos(angle) * 5, Math.sin(angle) * 5);
-                audio.playTease();
-            }
-        });
+document.querySelectorAll('.controls button').forEach(btn => {
+    btn.addEventListener('click', () => {
+        if (btn.id === 'action-reset') {
+            if (confirm('確定要重置養殖場嗎？')) resetGarden();
+            return;
+        }
+        document.querySelectorAll('.controls button').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        currentMode = btn.id.replace('mode-', '');
     });
+});
+
+function checkTease(x, y) {
+    planarians.forEach(p => p.points.forEach(pt => {
+        if (distance({x, y}, pt) < 50) {
+            pt.applyForce((pt.x - x) * 0.5, (pt.y - y) * 0.5);
+            audio.playTease();
+        }
+    }));
 }
 
 function triggerBell(x, y) {
-    audio.playBell();
-    window.bellTarget = {x, y};
-    createRipple(x, y, "#ff8fa3"); // Pink ripple for bell
-    
-    // Bell lasts for 3 seconds
-    setTimeout(() => {
-        window.bellTarget = null;
-    }, 3000);
+    audio.playBell(); window.bellTarget = {x, y}; createRipple(x, y, "#ff8fa3");
+    setTimeout(() => { window.bellTarget = null; }, 3000);
 }
 
 function createRipple(x, y, color = "rgba(255, 255, 255, 0.5)") {
-    const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-    circle.setAttribute("cx", x);
-    circle.setAttribute("cy", y);
-    circle.setAttribute("r", "5");
-    circle.setAttribute("class", "ripple");
-    circle.style.stroke = color;
-    fxLayer.appendChild(circle);
-
-    let r = 5;
-    let opacity = 1;
-    function anim() {
-        r += 2;
-        opacity -= 0.02;
-        circle.setAttribute("r", r);
-        circle.style.opacity = opacity;
-        if (opacity > 0) requestAnimationFrame(anim);
-        else circle.remove();
-    }
-    anim();
+    const c = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+    c.setAttribute("cx", x); c.setAttribute("cy", y); c.setAttribute("r", "5");
+    c.setAttribute("class", "ripple"); c.style.stroke = color;
+    fxLayer.appendChild(c);
+    let r = 5, o = 1;
+    function a() { r += 2; o -= 0.02; c.setAttribute("r", r); c.style.opacity = o; if (o > 0) requestAnimationFrame(a); else c.remove(); }
+    a();
 }
 
 function createFood(x, y) {
-    const heart = document.createElementNS("http://www.w3.org/2000/svg", "path");
-    heart.setAttribute("d", "M 10,30 A 20,20 0,0,1 50,30 A 20,20 0,0,1 90,30 Q 90,60 50,90 Q 10,60 10,30 z");
-    heart.setAttribute("transform", `translate(${x - 10}, ${y - 10}) scale(0.2)`);
-    heart.setAttribute("class", "heart-food");
-    foodLayer.appendChild(heart);
-    foods.push({x, y});
+    const h = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    h.setAttribute("d", "M 10,30 A 20,20 0,0,1 50,30 A 20,20 0,0,1 90,30 Q 90,60 50,90 Q 10,60 10,30 z");
+    h.setAttribute("transform", `translate(${x - 10}, ${y - 10}) scale(0.2)`);
+    h.setAttribute("class", "heart-food"); foodLayer.appendChild(h); foods.push({x, y});
 }
 
 function checkCut(x, y) {
     createSparkle(x, y);
-    // Use a while loop to safely remove items during iteration
     let i = planarians.length;
     while (i--) {
         const p = planarians[i];
         for (let j = 0; j < p.points.length - 1; j++) {
-            const p1 = p.points[j];
-            const p2 = p.points[j+1];
-            const d = distToSegment({x, y}, p1, p2);
-            // Increased radius for easier cutting (20px)
-            // Now allows splitting if total nodes >= 6
-            if (d < 20 && p.points.length >= 6) {
-                splitPlanarian(i, j);
-                return; // Cut one at a time for stability
+            if (distToSegment({x, y}, p.points[j], p.points[j+1]) < 20 && p.points.length >= 6) {
+                splitPlanarian(i, j); return;
             }
         }
     }
 }
 
 function createSparkle(x, y) {
-    const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-    circle.setAttribute("cx", x + (Math.random() - 0.5) * 10);
-    circle.setAttribute("cy", y + (Math.random() - 0.5) * 10);
-    circle.setAttribute("r", 1 + Math.random() * 3);
-    circle.setAttribute("fill", "#ff8fa3");
-    circle.setAttribute("filter", "none"); // Don't gooey the sparkles
-    fxLayer.appendChild(circle);
-
-    let opacity = 1;
-    function anim() {
-        opacity -= 0.05;
-        circle.style.opacity = opacity;
-        if (opacity > 0) requestAnimationFrame(anim);
-        else circle.remove();
-    }
-    anim();
+    const c = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+    c.setAttribute("cx", x + (Math.random()-0.5)*10); c.setAttribute("cy", y + (Math.random()-0.5)*10);
+    c.setAttribute("r", 1+Math.random()*3); c.setAttribute("fill", "#ff8fa3"); fxLayer.appendChild(c);
+    let o = 1; function a() { o -= 0.05; c.style.opacity = o; if (o > 0) requestAnimationFrame(a); else c.remove(); }
+    a();
 }
 
 function distToSegment(p, v, w) {
@@ -694,120 +473,48 @@ function distToSegment(p, v, w) {
 }
 
 function splitPlanarian(idx, splitIdx) {
-    // Population control: max 20 planarians
     if (planarians.length >= 20) return;
-
     audio.playCut();
     const p = planarians[idx];
-    
-    // Get the points for each half
-    const points1 = p.points.slice(0, splitIdx + 1);
-    const points2 = p.points.slice(splitIdx + 1);
-
-    if (points1.length < 3 || points2.length < 3) return;
-
-    // IMPORTANT: Reset velocities to prevent "zoom-off"
-    [...points1, ...points2].forEach(pt => {
-        pt.oldX = pt.x;
-        pt.oldY = pt.y;
-    });
-
-    const nodeDist = p.nodeDist;
-    const color = p.color; // 繼承色彩
-    p.destroy();
-    planarians.splice(idx, 1);
-
-    // Part 1 (Head)
-    const p1 = new Planarian(0, 0, points1.length, nodeDist, points1, color);
-    p1.hasHead = true;
-    p1.stunTimer = 60; // Stun for 1 second
-    planarians.push(p1);
-
-    // Part 2 (Tail -> Needs regeneration)
-    const p2 = new Planarian(0, 0, points2.length, nodeDist, points2, color);
-    p2.hasHead = false;
-    p2.stunTimer = 60; // Stun for 1 second
-    planarians.push(p2);
+    const p1pts = p.points.slice(0, splitIdx + 1), p2pts = p.points.slice(splitIdx + 1);
+    if (p1pts.length < 3 || p2pts.length < 3) return;
+    [...p1pts, ...p2pts].forEach(pt => { pt.oldX = pt.x; pt.oldY = pt.y; });
+    const nd = p.nodeDist, clr = p.color;
+    p.destroy(); planarians.splice(idx, 1);
+    const n1 = new Planarian(0, 0, p1pts.length, nd, p1pts, clr); n1.stunTimer = 60; planarians.push(n1);
+    const n2 = new Planarian(0, 0, p2pts.length, nd, p2pts, clr); n2.hasHead = false; n2.stunTimer = 60; planarians.push(n2);
 }
 
 function createBubbles() {
-    audio.playClean();
-    waterPurity = 100;
-    
+    audio.playClean(); waterPurity = 100;
     planarians.forEach(p => {
         p.stunTimer = 60;
-        p.points.forEach(pt => {
-            pt.applyForce((Math.random() - 0.5) * 30, 40 + Math.random() * 40);
-        });
+        p.points.forEach(pt => pt.applyForce((Math.random()-0.5)*30, 40+Math.random()*40));
         p.angle += Math.PI;
     });
-
     for (let i = 0; i < 20; i++) {
-        const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-        const x = Math.random() * width;
-        const r = 5 + Math.random() * 15;
-        circle.setAttribute("cx", x);
-        circle.setAttribute("cy", height + 50);
-        circle.setAttribute("r", r);
-        circle.setAttribute("fill", "white");
-        circle.setAttribute("opacity", "0.5");
-        fxLayer.appendChild(circle);
-
-        let curY = height + 50;
-        let speed = 3 + Math.random() * 5;
-        function anim() {
-            curY -= speed;
-            circle.setAttribute("cy", curY);
-            if (curY > -50) requestAnimationFrame(anim);
-            else circle.remove();
-        }
-        anim();
+        const c = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+        const x = Math.random()*width, r = 5+Math.random()*15;
+        c.setAttribute("cx", x); c.setAttribute("cy", height+50); c.setAttribute("r", r);
+        c.setAttribute("fill", "white"); c.setAttribute("opacity", "0.5"); fxLayer.appendChild(c);
+        let curY = height+50, spd = 3+Math.random()*5;
+        function a() { curY -= spd; c.setAttribute("cy", curY); if (curY > -50) requestAnimationFrame(a); else c.remove(); }
+        a();
     }
 }
-
-// --- UI Logic ---
-document.querySelectorAll('.controls button').forEach(btn => {
-    btn.addEventListener('click', () => {
-        if (btn.id === 'action-reset') {
-            if (confirm('確定要重置養殖場嗎？所有渦蟲都會消失喔！')) {
-                resetGarden();
-            }
-            return;
-        }
-        document.querySelectorAll('.controls button').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-        currentMode = btn.id.replace('mode-', '');
-    });
-});
 
 function resetGarden() {
-    planarians.forEach(p => p.destroy());
-    planarians = [];
-    foods = [];
-    foodLayer.innerHTML = '';
-    waterPurity = 100;
-    localStorage.removeItem('pinky_planarian_state');
-    
-    // Create 3 fresh ones
-    for (let i = 0; i < 3; i++) {
-        planarians.push(new Planarian(width / 2 + (Math.random() - 0.5) * 200, height / 2 + (Math.random() - 0.5) * 200));
-    }
+    planarians.forEach(p => p.destroy()); planarians = []; foods = []; foodLayer.innerHTML = '';
+    waterPurity = 100; localStorage.removeItem('pinky_planarian_state');
+    for (let i = 0; i < 3; i++) planarians.push(new Planarian(width/2 + (Math.random()-0.5)*200, height/2 + (Math.random()-0.5)*200));
 }
-
-init();
 
 function saveState() {
     const data = planarians.map(p => ({
         points: p.points.map(pt => ({x: pt.x, y: pt.y})),
-        hasHead: p.hasHead,
-        color: p.color,
-        nodeDist: p.nodeDist,
-        eatCount: p.eatCount
+        hasHead: p.hasHead, color: p.color, nodeDist: p.nodeDist, eatCount: p.eatCount
     }));
-    localStorage.setItem('pinky_planarian_state', JSON.stringify({
-        planarians: data,
-        waterPurity: waterPurity
-    }));
+    localStorage.setItem('pinky_planarian_state', JSON.stringify({ planarians: data, waterPurity: waterPurity }));
 }
 
 function loadState() {
@@ -815,35 +522,14 @@ function loadState() {
         const saved = localStorage.getItem('pinky_planarian_state');
         if (!saved) return false;
         const data = JSON.parse(saved);
-        
         waterPurity = data.waterPurity || 100;
-        
         data.planarians.forEach(d => {
             const points = d.points.map(pt => new Point(pt.x, pt.y));
-            
-            // Safety check (v1.01): If points are all at 0,0 or out of bounds, teleport to center
-            const isInvalid = points.every(pt => (pt.x <= 1 && pt.y <= 1)) || 
-                             points.every(pt => (pt.x > width || pt.y > height));
-            
-            if (isInvalid) {
-                const centerX = width / 2;
-                const centerY = height / 2;
-                points.forEach((pt, idx) => {
-                    pt.x = pt.oldX = centerX + idx * 5;
-                    pt.y = pt.oldY = centerY;
-                });
-            }
-
             const p = new Planarian(0, 0, points.length, d.nodeDist, points, d.color);
-            p.hasHead = d.hasHead;
-            p.eatCount = d.eatCount || 0;
-            planarians.push(p);
+            p.hasHead = d.hasHead; p.eatCount = d.eatCount || 0; planarians.push(p);
         });
         return true;
-    } catch (e) {
-        console.error("Failed to load state", e);
-        return false;
-    }
+    } catch (e) { return false; }
 }
 
 function createHeartBurst(x, y) {
@@ -851,22 +537,13 @@ function createHeartBurst(x, y) {
         const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
         p.setAttribute("d", "M 10,30 A 20,20 0,0,1 50,30 A 20,20 0,0,1 90,30 Q 90,60 50,90 Q 10,60 10,30 z");
         p.setAttribute("fill", "#ff4d6d");
-        const scale = 0.05 + Math.random() * 0.1;
-        const angle = Math.random() * Math.PI * 2;
-        const dist = 20 + Math.random() * 30;
-        
+        const s = 0.05 + Math.random()*0.1, a = Math.random()*Math.PI*2, dist = 20+Math.random()*30;
         fxLayer.appendChild(p);
-
         let t = 0;
         function anim() {
-            t += 0.05;
-            const curDist = dist * t;
-            const curX = x + Math.cos(angle) * curDist;
-            const curY = y + Math.sin(angle) * curDist;
-            p.setAttribute("transform", `translate(${curX}, ${curY}) scale(${scale})`);
-            p.style.opacity = 1 - t;
-            if (t < 1) requestAnimationFrame(anim);
-            else p.remove();
+            t += 0.05; const curD = dist*t;
+            p.setAttribute("transform", `translate(${x + Math.cos(a)*curD}, ${y + Math.sin(a)*curD}) scale(${s})`);
+            p.style.opacity = 1 - t; if (t < 1) requestAnimationFrame(anim); else p.remove();
         }
         anim();
     }
@@ -876,79 +553,16 @@ function checkSocial() {
     const now = Date.now();
     for (let i = 0; i < planarians.length; i++) {
         for (let j = i + 1; j < planarians.length; j++) {
-            const p1 = planarians[i];
-            const p2 = planarians[j];
+            const p1 = planarians[i], p2 = planarians[j];
             if (!p1.hasHead || !p2.hasHead) continue;
-
-            const d = distance(p1.points[0], p2.points[0]);
-            if (d < 30 && now - p1.lastKissTime > 5000 && now - p2.lastKissTime > 5000) {
-                // Trigger Kiss
-                p1.lastKissTime = now;
-                p2.lastKissTime = now;
-                const midX = (p1.points[0].x + p2.points[0].x) / 2;
-                const midY = (p1.points[0].y + p2.points[0].y) / 2;
-                createRipple(midX, midY, "#ff4d6d"); // Pink ripple
-                createHeartBurst(midX, midY);
-                audio.playKiss();
+            if (distance(p1.points[0], p2.points[0]) < 30 && now - p1.lastKissTime > 5000) {
+                p1.lastKissTime = p2.lastKissTime = now;
+                const mx = (p1.points[0].x + p2.points[0].x)/2, my = (p1.points[0].y + p2.points[0].y)/2;
+                createRipple(mx, my, "#ff4d6d"); createHeartBurst(mx, my); audio.playKiss();
             }
         }
     }
 }
 
-// --- Seaweed (v0.10) ---
-class Seaweed {
-    constructor(x, y, numNodes = 8) {
-        this.points = [];
-        this.constraints = [];
-        this.nodeDist = 12 + Math.random() * 8;
-        
-        for (let i = 0; i < numNodes; i++) {
-            const p = new Point(x, y - i * this.nodeDist, i === 0); // Bottom is static
-            this.points.push(p);
-        }
-        
-        for (let i = 0; i < numNodes - 1; i++) {
-            this.constraints.push(new Constraint(this.points[i], this.points[i+1], this.nodeDist));
-        }
-
-        this.path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-        this.path.setAttribute("fill", "none");
-        this.path.setAttribute("stroke", "#b2f2bb"); // Macaron green
-        this.path.setAttribute("stroke-width", "8");
-        this.path.setAttribute("stroke-linecap", "round");
-        seaweedLayer.appendChild(this.path);
-    }
-
-    update() {
-        // Sway with water
-        const sway = Math.sin(Date.now() * 0.001 + this.points[0].x) * 0.2;
-        for (let i = 1; i < this.points.length; i++) {
-            this.points[i].applyForce(sway * i, 0);
-        }
-
-        // Interact with mouse
-        this.points.forEach(p => {
-            const d = distance(p, {x: mouseX, y: mouseY});
-            if (d < 50) {
-                const dx = p.x - mouseX;
-                p.applyForce(dx * 0.1, 0);
-            }
-        });
-
-        this.points.forEach(p => p.update(0.95)); // Higher friction for seaweed
-        for (let i = 0; i < 2; i++) {
-            this.constraints.forEach(c => c.resolve());
-        }
-
-        // Render
-        let d = `M ${this.points[0].x} ${this.points[0].y}`;
-        for (let i = 0; i < this.points.length - 1; i++) {
-            const p1 = this.points[i];
-            const p2 = this.points[i+1];
-            const midX = (p1.x + p2.x) / 2;
-            const midY = (p1.y + p2.y) / 2;
-            d += ` Q ${p1.x} ${p1.y} ${midX} ${midY}`;
-        }
-        this.path.setAttribute("d", d);
-    }
-}
+// --- 7. Start ---
+init();
