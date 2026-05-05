@@ -77,8 +77,10 @@ class Constraint {
 }
 
 // --- Planarian ---
+const PINK_COLORS = ['#ffb7c5', '#ffc0cb', '#ffd1dc', '#ff9aa2', '#ffb3ba', '#e2bbfd'];
+
 class Planarian {
-    constructor(x, y, numNodes = 7, nodeDist = 15, existingPoints = null) {
+    constructor(x, y, numNodes = 7, nodeDist = 15, existingPoints = null, color = null) {
         this.points = existingPoints || [];
         this.constraints = [];
         this.hasHead = true;
@@ -88,7 +90,8 @@ class Planarian {
         this.angle = Math.random() * Math.PI * 2;
         this.speed = 0.2 + Math.random() * 0.3;
         this.nodeDist = nodeDist;
-        this.baseRadii = []; // 存儲基礎半徑以供脈動使用
+        this.baseRadii = [];
+        this.color = color || PINK_COLORS[Math.floor(Math.random() * PINK_COLORS.length)];
 
 
         // 如果沒有傳入現有節點，則初始化新節點
@@ -110,6 +113,7 @@ class Planarian {
         for (let i = 0; i < numNodes; i++) {
             const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
             circle.setAttribute("class", "planarian-body");
+            circle.setAttribute("fill", this.color); // 使用個體色彩
             const radius = Math.max(2, nodeDist * (1 - i / numNodes) * 1.2);
             circle.setAttribute("r", radius);
             this.baseRadii.push(radius);
@@ -119,6 +123,7 @@ class Planarian {
 
         this.head = document.createElementNS("http://www.w3.org/2000/svg", "path");
         this.head.setAttribute("class", "planarian-body");
+        this.head.setAttribute("fill", this.color); // 使用個體色彩
         this.group.appendChild(this.head);
 
         this.eyeWhiteL = document.createElementNS("http://www.w3.org/2000/svg", "circle");
@@ -345,16 +350,18 @@ class Planarian {
             const newPoint = new Point(lastPoint.x + dx, lastPoint.y + dy);
             this.points.push(newPoint);
             this.constraints.push(new Constraint(lastPoint, newPoint, this.nodeDist));
-            
+            // 增加新 DOM 節點
             const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
             circle.setAttribute("class", "planarian-body");
+            circle.setAttribute("fill", this.color); // 保持色彩一致
             const newRadius = 2 * (1.02 ** this.eatCount);
             circle.setAttribute("r", newRadius);
             this.baseRadii.push(newRadius);
             this.group.insertBefore(circle, this.head);
             this.bodySegments.push(circle);
-        }
-    }
+            }
+            }
+
 
     destroy() {
         this.group.remove();
@@ -447,21 +454,32 @@ function init() {
     resize();
     window.addEventListener('resize', resize);
 
-    // Initial planarians
-    for (let i = 0; i < 3; i++) {
-        planarians.push(new Planarian(width / 2 + (Math.random() - 0.5) * 200, height / 2 + (Math.random() - 0.5) * 200));
+    // Try to load saved state
+    if (!loadState()) {
+        // Initial planarians if no save found
+        for (let i = 0; i < 3; i++) {
+            planarians.push(new Planarian(width / 2 + (Math.random() - 0.5) * 200, height / 2 + (Math.random() - 0.5) * 200));
+        }
     }
 
     // Audio start on first click
-    window.addEventListener('mousedown', () => audio.start(), { once: true });
+    window.addEventListener('pointerdown', () => audio.start(), { once: true });
 
     requestAnimationFrame(loop);
 }
 
+let saveTimer = 0;
 function loop() {
     // Water slowly gets dirty
     waterPurity = Math.max(0, waterPurity - 0.01);
     dirtyLayer.setAttribute("opacity", (1 - waterPurity / 100) * 0.3);
+
+    // Save state every 5 seconds (300 frames)
+    saveTimer++;
+    if (saveTimer > 300) {
+        saveState();
+        saveTimer = 0;
+    }
 
     // Throttled Interaction logic (v0.03)
     if (isPointerDown) {
@@ -630,17 +648,18 @@ function splitPlanarian(idx, splitIdx) {
     });
 
     const nodeDist = p.nodeDist;
+    const color = p.color; // 繼承色彩
     p.destroy();
     planarians.splice(idx, 1);
 
     // Part 1 (Head)
-    const p1 = new Planarian(0, 0, points1.length, nodeDist, points1);
+    const p1 = new Planarian(0, 0, points1.length, nodeDist, points1, color);
     p1.hasHead = true;
     p1.stunTimer = 60; // Stun for 1 second
     planarians.push(p1);
 
     // Part 2 (Tail -> Needs regeneration)
-    const p2 = new Planarian(0, 0, points2.length, nodeDist, points2);
+    const p2 = new Planarian(0, 0, points2.length, nodeDist, points2, color);
     p2.hasHead = false;
     p2.stunTimer = 60; // Stun for 1 second
     planarians.push(p2);
@@ -691,3 +710,39 @@ document.querySelectorAll('.controls button').forEach(btn => {
 });
 
 init();
+
+function saveState() {
+    const data = planarians.map(p => ({
+        points: p.points.map(pt => ({x: pt.x, y: pt.y})),
+        hasHead: p.hasHead,
+        color: p.color,
+        nodeDist: p.nodeDist,
+        eatCount: p.eatCount
+    }));
+    localStorage.setItem('pinky_planarian_state', JSON.stringify({
+        planarians: data,
+        waterPurity: waterPurity
+    }));
+}
+
+function loadState() {
+    try {
+        const saved = localStorage.getItem('pinky_planarian_state');
+        if (!saved) return false;
+        const data = JSON.parse(saved);
+        
+        waterPurity = data.waterPurity || 100;
+        
+        data.planarians.forEach(d => {
+            const points = d.points.map(pt => new Point(pt.x, pt.y));
+            const p = new Planarian(0, 0, points.length, d.nodeDist, points, d.color);
+            p.hasHead = d.hasHead;
+            p.eatCount = d.eatCount || 0;
+            planarians.push(p);
+        });
+        return true;
+    } catch (e) {
+        console.error("Failed to load state", e);
+        return false;
+    }
+}
