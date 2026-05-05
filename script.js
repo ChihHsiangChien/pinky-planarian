@@ -6,11 +6,13 @@
 const canvas = document.getElementById('game-canvas');
 const bodiesLayer = document.getElementById('bodies-layer');
 const eyesLayer = document.getElementById('eyes-layer');
+const seaweedLayer = document.getElementById('seaweed-layer');
 const foodLayer = document.getElementById('food-layer');
 const fxLayer = document.getElementById('fx-layer');
 
 let width, height;
 let planarians = [];
+let seaweeds = [];
 let foods = [];
 let currentMode = 'observe'; // observe, feed, cut, tease, bell, clean
 let waterPurity = 100;
@@ -189,10 +191,10 @@ class Planarian {
             let foundTarget = false;
             const head = this.points[0];
 
-            // Environment effect: Water Purity affects speed
-            const healthFactor = 0.3 + (waterPurity / 100) * 0.7;
+            // Environment effect: Water Purity and Night affect speed
+            const nightFactor = window.isNight ? 0.4 : 1.0;
+            const healthFactor = (0.3 + (waterPurity / 100) * 0.7) * nightFactor;
             const currentSpeed = this.speed * healthFactor;
-
             // 0. Observe Curiosity
             if (currentMode === 'observe') {
                 const d = distance(head, {x: mouseX, y: mouseY});
@@ -482,6 +484,11 @@ function init() {
         }
     }
 
+    // Initialize Seaweed (v0.10)
+    for (let i = 0; i < 5; i++) {
+        seaweeds.push(new Seaweed((width / 6) * (i + 1), height));
+    }
+
     // Audio start on first click
     window.addEventListener('pointerdown', () => audio.start(), { once: true });
 
@@ -495,37 +502,52 @@ function loop() {
     waterPurity = Math.max(0, waterPurity - 0.01);
     dirtyLayer.setAttribute("opacity", (1 - waterPurity / 100) * 0.3);
 
-    // Throttled Social logic (v0.09) - check every 10 frames
+    // v0.10: Day/Night Cycle (Every 2 minutes full cycle)
+    const time = (Date.now() / 120000) % 1; 
+    let bgColor, lightIntensity;
+    
+    if (time < 0.4) { // Day
+        bgColor = `hsl(187, 60%, ${92 + Math.sin(time * 10) * 2}%)`;
+        window.isNight = false;
+    } else if (time < 0.6) { // Sunset
+        const t = (time - 0.4) / 0.2;
+        bgColor = `hsl(${187 - t * 160}, ${60 + t * 20}%, ${92 - t * 40}%)`;
+        window.isNight = t > 0.5;
+    } else if (time < 0.9) { // Night
+        bgColor = `hsl(27, 80%, 30%)`;
+        window.isNight = true;
+    } else { // Sunrise
+        const t = (time - 0.9) / 0.1;
+        bgColor = `hsl(${27 + t * 160}, ${80 - t * 20}%, ${30 + t * 62}%)`;
+        window.isNight = false;
+    }
+    canvas.style.backgroundColor = bgColor;
+
+    // Update stats UI
+    statCount.innerText = planarians.length;
+    statPurity.innerText = Math.round(waterPurity) + '%';
+
+    // v0.09: Social logic
     socialTimer++;
     if (socialTimer > 10) {
         checkSocial();
         socialTimer = 0;
     }
 
-    // Update stats UI (v0.08)
-    statCount.innerText = planarians.length;
-    statPurity.innerText = Math.round(waterPurity) + '%';
-
-    // v0.06: Living Water effect
-    const bgOsc = Math.sin(Date.now() * 0.001) * 2;
-    canvas.style.backgroundColor = `hsl(${187 + bgOsc}, 60%, 92%)`;
-
-    // Save state every 5 seconds (300 frames)
+    // v0.04: Save logic
     saveTimer++;
     if (saveTimer > 300) {
         saveState();
         saveTimer = 0;
     }
 
-    // Throttled Interaction logic (v0.03)
+    // Throttled logic
     if (isPointerDown) {
-        if (currentMode === 'cut') {
-            checkCut(mouseX, mouseY);
-        } else if (currentMode === 'tease') {
-            checkTease(mouseX, mouseY);
-        }
+        if (currentMode === 'cut') checkCut(mouseX, mouseY);
+        else if (currentMode === 'tease') checkTease(mouseX, mouseY);
     }
 
+    seaweeds.forEach(s => s.update());
     planarians.forEach(p => p.update());
     requestAnimationFrame(loop);
 }
@@ -850,5 +872,63 @@ function checkSocial() {
                 audio.playKiss();
             }
         }
+    }
+}
+
+// --- Seaweed (v0.10) ---
+class Seaweed {
+    constructor(x, y, numNodes = 8) {
+        this.points = [];
+        this.constraints = [];
+        this.nodeDist = 12 + Math.random() * 8;
+        
+        for (let i = 0; i < numNodes; i++) {
+            const p = new Point(x, y - i * this.nodeDist, i === 0); // Bottom is static
+            this.points.push(p);
+        }
+        
+        for (let i = 0; i < numNodes - 1; i++) {
+            this.constraints.push(new Constraint(this.points[i], this.points[i+1], this.nodeDist));
+        }
+
+        this.path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        this.path.setAttribute("fill", "none");
+        this.path.setAttribute("stroke", "#b2f2bb"); // Macaron green
+        this.path.setAttribute("stroke-width", "8");
+        this.path.setAttribute("stroke-linecap", "round");
+        seaweedLayer.appendChild(this.path);
+    }
+
+    update() {
+        // Sway with water
+        const sway = Math.sin(Date.now() * 0.001 + this.points[0].x) * 0.2;
+        for (let i = 1; i < this.points.length; i++) {
+            this.points[i].applyForce(sway * i, 0);
+        }
+
+        // Interact with mouse
+        this.points.forEach(p => {
+            const d = distance(p, {x: mouseX, y: mouseY});
+            if (d < 50) {
+                const dx = p.x - mouseX;
+                p.applyForce(dx * 0.1, 0);
+            }
+        });
+
+        this.points.forEach(p => p.update(0.95)); // Higher friction for seaweed
+        for (let i = 0; i < 2; i++) {
+            this.constraints.forEach(c => c.resolve());
+        }
+
+        // Render
+        let d = `M ${this.points[0].x} ${this.points[0].y}`;
+        for (let i = 0; i < this.points.length - 1; i++) {
+            const p1 = this.points[i];
+            const p2 = this.points[i+1];
+            const midX = (p1.x + p2.x) / 2;
+            const midY = (p1.y + p2.y) / 2;
+            d += ` Q ${p1.x} ${p1.y} ${midX} ${midY}`;
+        }
+        this.path.setAttribute("d", d);
     }
 }
