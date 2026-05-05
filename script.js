@@ -474,13 +474,19 @@ function resize() {
 
 function init() {
     resize();
+    // 確保 width/height 有效
+    if (width <= 0 || height <= 0) {
+        setTimeout(init, 100);
+        return;
+    }
+
     window.addEventListener('resize', resize);
 
     // Try to load saved state
     if (!loadState()) {
         // Initial planarians if no save found
         for (let i = 0; i < 3; i++) {
-            planarians.push(new Planarian(width / 2 + (Math.random() - 0.5) * 200, height / 2 + (Math.random() - 0.5) * 200));
+            planarians.push(new Planarian(width / 2 + (Math.random() - 0.5) * 100, height / 2 + (Math.random() - 0.5) * 100));
         }
     }
 
@@ -814,6 +820,20 @@ function loadState() {
         
         data.planarians.forEach(d => {
             const points = d.points.map(pt => new Point(pt.x, pt.y));
+            
+            // Safety check (v1.01): If points are all at 0,0 or out of bounds, teleport to center
+            const isInvalid = points.every(pt => (pt.x <= 1 && pt.y <= 1)) || 
+                             points.every(pt => (pt.x > width || pt.y > height));
+            
+            if (isInvalid) {
+                const centerX = width / 2;
+                const centerY = height / 2;
+                points.forEach((pt, idx) => {
+                    pt.x = pt.oldX = centerX + idx * 5;
+                    pt.y = pt.oldY = centerY;
+                });
+            }
+
             const p = new Planarian(0, 0, points.length, d.nodeDist, points, d.color);
             p.hasHead = d.hasHead;
             p.eatCount = d.eatCount || 0;
