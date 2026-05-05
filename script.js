@@ -18,6 +18,8 @@ let mouseX = 0, mouseY = 0;
 let isPointerDown = false;
 
 const dirtyLayer = document.getElementById('dirty-layer');
+const statCount = document.getElementById('stat-count');
+const statPurity = document.getElementById('stat-purity');
 
 // --- Utilities ---
 const distance = (p1, p2) => Math.sqrt((p1.x - p2.x) ** 2 + (p1.y - p2.y) ** 2);
@@ -480,6 +482,10 @@ function loop() {
     waterPurity = Math.max(0, waterPurity - 0.01);
     dirtyLayer.setAttribute("opacity", (1 - waterPurity / 100) * 0.3);
 
+    // Update stats UI (v0.08)
+    statCount.innerText = planarians.length;
+    statPurity.innerText = Math.round(waterPurity) + '%';
+
     // v0.06: Living Water effect
     const bgOsc = Math.sin(Date.now() * 0.001) * 2;
     canvas.style.backgroundColor = `hsl(${187 + bgOsc}, 60%, 92%)`;
@@ -714,11 +720,31 @@ function createBubbles() {
 // --- UI Logic ---
 document.querySelectorAll('.controls button').forEach(btn => {
     btn.addEventListener('click', () => {
+        if (btn.id === 'action-reset') {
+            if (confirm('確定要重置養殖場嗎？所有渦蟲都會消失喔！')) {
+                resetGarden();
+            }
+            return;
+        }
         document.querySelectorAll('.controls button').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
         currentMode = btn.id.replace('mode-', '');
     });
 });
+
+function resetGarden() {
+    planarians.forEach(p => p.destroy());
+    planarians = [];
+    foods = [];
+    foodLayer.innerHTML = '';
+    waterPurity = 100;
+    localStorage.removeItem('pinky_planarian_state');
+    
+    // Create 3 fresh ones
+    for (let i = 0; i < 3; i++) {
+        planarians.push(new Planarian(width / 2 + (Math.random() - 0.5) * 200, height / 2 + (Math.random() - 0.5) * 200));
+    }
+}
 
 init();
 

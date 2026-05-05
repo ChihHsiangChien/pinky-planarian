@@ -19,6 +19,10 @@
 <body>
     <div id="ui-container">
         <h1>Pinky Planarian Garden</h1>
+        <div id="stats-panel">
+            個體數: <span id="stat-count">0</span> | 
+            水質: <span id="stat-purity">100%</span>
+        </div>
         <div class="controls">
             <button id="mode-observe" class="active">觀察</button>
             <button id="mode-feed">餵食</button>
@@ -26,10 +30,12 @@
             <button id="mode-tease">逗弄</button>
             <button id="mode-bell">召喚</button>
             <button id="mode-clean">換水</button>
+            <button id="action-reset" style="border-color: #ff4d6d; color: #ff4d6d;">重置</button>
         </div>
     </div>
+    ...
+    <div id="version-tag">v0.08</div>
 
-    <svg id="game-canvas">
         <defs>
             <filter id="gooey">
                 <feGaussianBlur in="SourceGraphic" stdDeviation="3" result="blur" />
