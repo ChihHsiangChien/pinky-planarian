@@ -1,8 +1,22 @@
 /**
  * Pinky Planarian Garden
- * Version: v1.02
- * Core Physics: Verlet Integration
+ * Version: v1.03-debug
  */
+
+// --- 0. Debugger ---
+const debugInfo = {
+    logs: [],
+    log(msg) {
+        console.log(msg);
+        this.logs.push(msg);
+        const el = document.getElementById('debug-console');
+        if (el) el.innerText = this.logs.slice(-5).join('\n');
+    }
+};
+
+window.onerror = function(msg, url, line) {
+    debugInfo.log(`ERR: ${msg} (at ${line})`);
+};
 
 // --- 1. Constants & Globals ---
 const canvas = document.getElementById('game-canvas');
@@ -341,19 +355,32 @@ const audio = new AudioEngine();
 function resize() {
     width = window.innerWidth; height = window.innerHeight;
     canvas.setAttribute("viewBox", `0 0 ${width} ${height}`);
+    debugInfo.log(`Resized: ${width}x${height}`);
 }
 
 function init() {
+    debugInfo.log("Initializing...");
     resize();
-    if (width <= 0 || height <= 0) { setTimeout(init, 100); return; }
+    if (width <= 0 || height <= 0) { 
+        debugInfo.log("Width/Height is zero, retrying...");
+        setTimeout(init, 500); return; 
+    }
     window.addEventListener('resize', resize);
 
-    if (!loadState()) {
-        for (let i = 0; i < 3; i++) planarians.push(new Planarian(width/2 + (Math.random()-0.5)*100, height/2 + (Math.random()-0.5)*100));
+    try {
+        if (!loadState()) {
+            debugInfo.log("No save state found, creating initials...");
+            for (let i = 0; i < 3; i++) planarians.push(new Planarian(width/2, height/2));
+        }
+        debugInfo.log(`Planarians: ${planarians.length}`);
+        for (let i = 0; i < 5; i++) seaweeds.push(new Seaweed((width/6)*(i+1), height));
+        debugInfo.log(`Seaweeds: ${seaweeds.length}`);
+    } catch(e) {
+        debugInfo.log(`Init Error: ${e.message}`);
     }
-    for (let i = 0; i < 5; i++) seaweeds.push(new Seaweed((width/6)*(i+1), height));
 
     window.addEventListener('pointerdown', () => audio.start(), { once: true });
+    debugInfo.log("Starting Loop...");
     requestAnimationFrame(loop);
 }
 
@@ -382,65 +409,61 @@ function loop() {
 }
 
 // --- 6. Utilities & Events ---
-window.addEventListener('mousemove', (e) => {
-    const rect = canvas.getBoundingClientRect();
-    mouseX = e.clientX - rect.left; mouseY = e.clientY - rect.top;
-});
-canvas.addEventListener('pointerdown', (e) => {
-    isPointerDown = true;
-    const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left, y = e.clientY - rect.top;
-    mouseX = x; mouseY = y;
-    if (currentMode === 'observe') createRipple(x, y);
-    else if (currentMode === 'feed') createFood(x, y);
-    else if (currentMode === 'tease') checkTease(x, y);
-    else if (currentMode === 'bell') triggerBell(x, y);
-    else if (currentMode === 'clean') createBubbles();
-});
-window.addEventListener('pointerup', () => isPointerDown = false);
-window.addEventListener('pointercancel', () => isPointerDown = false);
+function saveState() {
+    try {
+        const data = planarians.map(p => ({
+            points: p.points.map(pt => ({x: pt.x, y: pt.y})),
+            hasHead: p.hasHead, color: p.color, nodeDist: p.nodeDist, eatCount: p.eatCount
+        }));
+        localStorage.setItem('pinky_planarian_state', JSON.stringify({ planarians: data, waterPurity: waterPurity }));
+    } catch(e) { debugInfo.log("Save Fail"); }
+}
 
-document.querySelectorAll('.controls button').forEach(btn => {
-    btn.addEventListener('click', () => {
-        if (btn.id === 'action-reset') {
-            if (confirm('確定要重置養殖場嗎？')) resetGarden();
-            return;
+function loadState() {
+    try {
+        const saved = localStorage.getItem('pinky_planarian_state');
+        if (!saved) return false;
+        const data = JSON.parse(saved);
+        waterPurity = data.waterPurity || 100;
+        data.planarians.forEach(d => {
+            const pts = d.points.map(pt => new Point(pt.x, pt.y));
+            const p = new Planarian(0, 0, pts.length, d.nodeDist, pts, d.color);
+            p.hasHead = d.hasHead; p.eatCount = d.eatCount || 0; planarians.push(p);
+        });
+        return true;
+    } catch (e) { return false; }
+}
+
+function createHeartBurst(x, y) {
+    for (let i = 0; i < 6; i++) {
+        const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        p.setAttribute("d", "M 10,30 A 20,20 0,0,1 50,30 A 20,20 0,0,1 90,30 Q 90,60 50,90 Q 10,60 10,30 z");
+        p.setAttribute("fill", "#ff4d6d");
+        const s = 0.05 + Math.random()*0.1, a = Math.random()*Math.PI*2, dist = 20+Math.random()*30;
+        fxLayer.appendChild(p);
+        let t = 0;
+        function anim() {
+            t += 0.05; const curD = dist*t;
+            p.setAttribute("transform", `translate(${x + Math.cos(a)*curD}, ${y + Math.sin(a)*curD}) scale(${s})`);
+            p.style.opacity = 1 - t; if (t < 1) requestAnimationFrame(anim); else p.remove();
         }
-        document.querySelectorAll('.controls button').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-        currentMode = btn.id.replace('mode-', '');
-    });
-});
+        anim();
+    }
+}
 
-function checkTease(x, y) {
-    planarians.forEach(p => p.points.forEach(pt => {
-        if (distance({x, y}, pt) < 50) {
-            pt.applyForce((pt.x - x) * 0.5, (pt.y - y) * 0.5);
-            audio.playTease();
+function checkSocial() {
+    const now = Date.now();
+    for (let i = 0; i < planarians.length; i++) {
+        for (let j = i + 1; j < planarians.length; j++) {
+            const p1 = planarians[i], p2 = planarians[j];
+            if (!p1.hasHead || !p2.hasHead) continue;
+            if (distance(p1.points[0], p2.points[0]) < 30 && now - p1.lastKissTime > 5000) {
+                p1.lastKissTime = p2.lastKissTime = now;
+                const mx = (p1.points[0].x + p2.points[0].x)/2, my = (p1.points[0].y + p2.points[0].y)/2;
+                createRipple(mx, my, "#ff4d6d"); createHeartBurst(mx, my); audio.playKiss();
+            }
         }
-    }));
-}
-
-function triggerBell(x, y) {
-    audio.playBell(); window.bellTarget = {x, y}; createRipple(x, y, "#ff8fa3");
-    setTimeout(() => { window.bellTarget = null; }, 3000);
-}
-
-function createRipple(x, y, color = "rgba(255, 255, 255, 0.5)") {
-    const c = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-    c.setAttribute("cx", x); c.setAttribute("cy", y); c.setAttribute("r", "5");
-    c.setAttribute("class", "ripple"); c.style.stroke = color;
-    fxLayer.appendChild(c);
-    let r = 5, o = 1;
-    function a() { r += 2; o -= 0.02; c.setAttribute("r", r); c.style.opacity = o; if (o > 0) requestAnimationFrame(a); else c.remove(); }
-    a();
-}
-
-function createFood(x, y) {
-    const h = document.createElementNS("http://www.w3.org/2000/svg", "path");
-    h.setAttribute("d", "M 10,30 A 20,20 0,0,1 50,30 A 20,20 0,0,1 90,30 Q 90,60 50,90 Q 10,60 10,30 z");
-    h.setAttribute("transform", `translate(${x - 10}, ${y - 10}) scale(0.2)`);
-    h.setAttribute("class", "heart-food"); foodLayer.appendChild(h); foods.push({x, y});
+    }
 }
 
 function checkCut(x, y) {
@@ -509,60 +532,26 @@ function resetGarden() {
     for (let i = 0; i < 3; i++) planarians.push(new Planarian(width/2 + (Math.random()-0.5)*200, height/2 + (Math.random()-0.5)*200));
 }
 
-function saveState() {
-    const data = planarians.map(p => ({
-        points: p.points.map(pt => ({x: pt.x, y: pt.y})),
-        hasHead: p.hasHead, color: p.color, nodeDist: p.nodeDist, eatCount: p.eatCount
-    }));
-    localStorage.setItem('pinky_planarian_state', JSON.stringify({ planarians: data, waterPurity: waterPurity }));
+function createRipple(x, y, color = "rgba(255, 255, 255, 0.5)") {
+    const c = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+    c.setAttribute("cx", x); c.setAttribute("cy", y); c.setAttribute("r", "5");
+    c.setAttribute("class", "ripple"); c.style.stroke = color;
+    fxLayer.appendChild(c);
+    let r = 5, o = 1;
+    function a() { r += 2; o -= 0.02; c.setAttribute("r", r); c.style.opacity = o; if (o > 0) requestAnimationFrame(a); else c.remove(); }
+    a();
 }
 
-function loadState() {
-    try {
-        const saved = localStorage.getItem('pinky_planarian_state');
-        if (!saved) return false;
-        const data = JSON.parse(saved);
-        waterPurity = data.waterPurity || 100;
-        data.planarians.forEach(d => {
-            const points = d.points.map(pt => new Point(pt.x, pt.y));
-            const p = new Planarian(0, 0, points.length, d.nodeDist, points, d.color);
-            p.hasHead = d.hasHead; p.eatCount = d.eatCount || 0; planarians.push(p);
-        });
-        return true;
-    } catch (e) { return false; }
+function triggerBell(x, y) {
+    audio.playBell(); window.bellTarget = {x, y}; createRipple(x, y, "#ff8fa3");
+    setTimeout(() => { window.bellTarget = null; }, 3000);
 }
 
-function createHeartBurst(x, y) {
-    for (let i = 0; i < 6; i++) {
-        const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
-        p.setAttribute("d", "M 10,30 A 20,20 0,0,1 50,30 A 20,20 0,0,1 90,30 Q 90,60 50,90 Q 10,60 10,30 z");
-        p.setAttribute("fill", "#ff4d6d");
-        const s = 0.05 + Math.random()*0.1, a = Math.random()*Math.PI*2, dist = 20+Math.random()*30;
-        fxLayer.appendChild(p);
-        let t = 0;
-        function anim() {
-            t += 0.05; const curD = dist*t;
-            p.setAttribute("transform", `translate(${x + Math.cos(a)*curD}, ${y + Math.sin(a)*curD}) scale(${s})`);
-            p.style.opacity = 1 - t; if (t < 1) requestAnimationFrame(anim); else p.remove();
-        }
-        anim();
-    }
-}
+// --- Interaction Logic (Mouse) ---
+window.addEventListener('mousemove', (e) => {
+    const rect = canvas.getBoundingClientRect();
+    mouseX = e.clientX - rect.left; mouseY = e.clientY - rect.top;
+});
 
-function checkSocial() {
-    const now = Date.now();
-    for (let i = 0; i < planarians.length; i++) {
-        for (let j = i + 1; j < planarians.length; j++) {
-            const p1 = planarians[i], p2 = planarians[j];
-            if (!p1.hasHead || !p2.hasHead) continue;
-            if (distance(p1.points[0], p2.points[0]) < 30 && now - p1.lastKissTime > 5000) {
-                p1.lastKissTime = p2.lastKissTime = now;
-                const mx = (p1.points[0].x + p2.points[0].x)/2, my = (p1.points[0].y + p2.points[0].y)/2;
-                createRipple(mx, my, "#ff4d6d"); createHeartBurst(mx, my); audio.playKiss();
-            }
-        }
-    }
-}
-
-// --- 7. Start ---
+// --- Start ---
 init();
