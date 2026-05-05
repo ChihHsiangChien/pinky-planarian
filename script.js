@@ -246,7 +246,8 @@ class Planarian {
 
         // Verlet steps
         this.points.forEach(p => p.update());
-        for (let i = 0; i < 5; i++) {
+        // Reduce iterations for mobile performance (from 5 to 3)
+        for (let i = 0; i < 3; i++) {
             this.constraints.forEach(c => c.resolve());
         }
 
@@ -607,6 +608,9 @@ function distToSegment(p, v, w) {
 }
 
 function splitPlanarian(idx, splitIdx) {
+    // Population control: max 20 planarians
+    if (planarians.length >= 20) return;
+
     audio.playCut();
     const p = planarians[idx];
     
@@ -643,44 +647,30 @@ function createBubbles() {
     audio.playClean();
     waterPurity = 100;
     
-    // 讓渦蟲有「被沖水」的反應
     planarians.forEach(p => {
-        p.stunTimer = 60; // 進入驚嚇狀態 1 秒
+        p.stunTimer = 60;
         p.points.forEach(pt => {
-            // 強大的向下與隨機左右的沖刷力
             pt.applyForce((Math.random() - 0.5) * 30, 40 + Math.random() * 40);
         });
-        // 讓它們亂轉
         p.angle += Math.PI;
     });
 
-    for (let i = 0; i < 30; i++) { // 增加氣泡數量
+    for (let i = 0; i < 20; i++) {
         const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
         const x = Math.random() * width;
-        const r = 10 + Math.random() * 15; // 氣泡變大
+        const r = 5 + Math.random() * 15;
         circle.setAttribute("cx", x);
         circle.setAttribute("cy", height + 50);
         circle.setAttribute("r", r);
         circle.setAttribute("fill", "white");
-        circle.setAttribute("opacity", "0.6");
+        circle.setAttribute("opacity", "0.5");
         fxLayer.appendChild(circle);
 
         let curY = height + 50;
-        let speed = 4 + Math.random() * 6;
+        let speed = 3 + Math.random() * 5;
         function anim() {
             curY -= speed;
             circle.setAttribute("cy", curY);
-            
-            // 氣泡上升時也會輕微推開附近的渦蟲節點
-            planarians.forEach(p => {
-                p.points.forEach(pt => {
-                    const d = distance({x: parseFloat(circle.getAttribute("cx")), y: curY}, pt);
-                    if (d < r + 20) {
-                        pt.applyForce((pt.x - x) * 0.1, -1);
-                    }
-                });
-            });
-
             if (curY > -50) requestAnimationFrame(anim);
             else circle.remove();
         }

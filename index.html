@@ -32,9 +32,8 @@
     <svg id="game-canvas">
         <defs>
             <filter id="gooey">
-                <feGaussianBlur in="SourceGraphic" stdDeviation="4" result="blur" />
-                <feColorMatrix in="blur" mode="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 18 -7" result="goo" />
-                <feComposite in="SourceGraphic" in2="goo" operator="atop" />
+                <feGaussianBlur in="SourceGraphic" stdDeviation="3" result="blur" />
+                <feColorMatrix in="blur" mode="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 15 -6" result="goo" />
             </filter>
             
             <radialGradient id="bg-gradient" cx="50%" cy="50%" r="50%">
@@ -49,7 +48,7 @@
         <g id="fx-layer"></g>
     </svg>
 
-    <div id="version-tag">v0.01</div>
+    <div id="version-tag">v0.02</div>
     <script src="script.js"></script>
 </body>
 </html>
