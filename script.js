@@ -22,6 +22,7 @@ let currentMode = 'observe';
 let waterPurity = 100;
 let mouseX = 0, mouseY = 0;
 let isPointerDown = false;
+let activePointers = new Set();
 let saveTimer = 0;
 let socialTimer = 0;
 
@@ -276,6 +277,7 @@ class AudioEngine {
     constructor() {
         this.ctx = null; this.isStarted = false;
         this.scale = [261.63, 329.63, 392.00, 493.88, 587.33, 659.25, 783.99];
+        this.lastTeaseTime = 0;
     }
     start() {
         if (this.isStarted) return;
@@ -293,18 +295,29 @@ class AudioEngine {
         tick(0);
     }
     playNote(freq, time, vol, dur, type = 'triangle') {
+        if (!this.ctx) return;
         const osc = this.ctx.createOscillator(); const g = this.ctx.createGain();
         osc.type = type; osc.frequency.setValueAtTime(freq, time);
         g.gain.setValueAtTime(vol, time); g.gain.exponentialRampToValueAtTime(0.001, time + dur);
         osc.connect(g); g.connect(this.ctx.destination);
         osc.start(time); osc.stop(time + dur);
+        osc.onended = () => {
+            osc.disconnect();
+            g.disconnect();
+        };
     }
-    playCut() { this.playNote(1000 + Math.random() * 1000, this.ctx.currentTime, 0.2, 0.1, 'square'); }
-    playEat() { this.playNote(783.99, this.ctx.currentTime, 0.2, 0.3); this.playNote(1046.5, this.ctx.currentTime + 0.1, 0.1, 0.2); }
-    playClean() { for(let i=0; i<8; i++) this.playNote(400 + Math.random() * 800, this.ctx.currentTime + i * 0.05, 0.05, 0.1, 'sine'); }
-    playTease() { this.playNote(880 + Math.random() * 400, this.ctx.currentTime, 0.1, 0.1, 'sine'); }
-    playBell() { const n = this.ctx.currentTime; this.playNote(1567.98, n, 0.2, 0.5); this.playNote(1318.51, n + 0.1, 0.1, 0.4); }
-    playKiss() { const n = this.ctx.currentTime; this.playNote(1174.66, n, 0.1, 0.1, 'sine'); this.playNote(1567.98, n + 0.05, 0.1, 0.2, 'sine'); }
+    playCut() { if (!this.ctx) return; this.playNote(1000 + Math.random() * 1000, this.ctx.currentTime, 0.2, 0.1, 'square'); }
+    playEat() { if (!this.ctx) return; this.playNote(783.99, this.ctx.currentTime, 0.2, 0.3); this.playNote(1046.5, this.ctx.currentTime + 0.1, 0.1, 0.2); }
+    playClean() { if (!this.ctx) return; for(let i=0; i<8; i++) this.playNote(400 + Math.random() * 800, this.ctx.currentTime + i * 0.05, 0.05, 0.1, 'sine'); }
+    playTease() {
+        if (!this.ctx) return;
+        const now = Date.now();
+        if (now - this.lastTeaseTime < 150) return;
+        this.lastTeaseTime = now;
+        this.playNote(880 + Math.random() * 400, this.ctx.currentTime, 0.1, 0.1, 'sine');
+    }
+    playBell() { if (!this.ctx) return; const n = this.ctx.currentTime; this.playNote(1567.98, n, 0.2, 0.5); this.playNote(1318.51, n + 0.1, 0.1, 0.4); }
+    playKiss() { if (!this.ctx) return; const n = this.ctx.currentTime; this.playNote(1174.66, n, 0.1, 0.1, 'sine'); this.playNote(1567.98, n + 0.05, 0.1, 0.2, 'sine'); }
 }
 
 const audio = new AudioEngine();
@@ -353,11 +366,14 @@ function loop() {
 }
 
 // --- 7. Utilities & Events ---
-window.addEventListener('mousemove', (e) => {
-    const rect = canvas.getBoundingClientRect();
-    mouseX = e.clientX - rect.left; mouseY = e.clientY - rect.top;
+window.addEventListener('pointermove', (e) => {
+    if (activePointers.size === 0 || activePointers.has(e.pointerId)) {
+        const rect = canvas.getBoundingClientRect();
+        mouseX = e.clientX - rect.left; mouseY = e.clientY - rect.top;
+    }
 });
 canvas.addEventListener('pointerdown', (e) => {
+    activePointers.add(e.pointerId);
     isPointerDown = true;
     const rect = canvas.getBoundingClientRect();
     const x = e.clientX - rect.left, y = e.clientY - rect.top;
@@ -368,8 +384,15 @@ canvas.addEventListener('pointerdown', (e) => {
     else if (currentMode === 'bell') triggerBell(x, y);
     else if (currentMode === 'clean') createBubbles();
 });
-window.addEventListener('pointerup', () => isPointerDown = false);
-window.addEventListener('pointercancel', () => isPointerDown = false);
+window.addEventListener('pointerup', (e) => {
+    activePointers.delete(e.pointerId);
+    if (activePointers.size === 0) isPointerDown = false;
+});
+window.addEventListener('pointercancel', (e) => {
+    activePointers.delete(e.pointerId);
+    if (activePointers.size === 0) isPointerDown = false;
+});
+canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
 document.querySelectorAll('.controls button').forEach(btn => {
     btn.addEventListener('click', (e) => {
